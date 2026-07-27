@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Downloader — Multi-Tool</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="page">
+    <a class="back-link" href="/">&larr; Toolkit</a>
+
+    <header class="page-header">
+      <span class="eyebrow">TOOL // 01</span>
+      <h1>Video Downloader</h1>
+      <p class="subtitle">Paste a source URL, pick a destination, submit.</p>
+    </header>
+
+    <main class="tool-layout">
+      <form class="tool-form">
+        <label for="url">Source URL</label>
+        <input id="url" name="url" type="url" placeholder="https://..." disabled>
+
+        <label for="destination">Destination</label>
+        <select id="destination" disabled>
+          <option>Google Drive</option>
+          <option>Mega.nz</option>
+          <option>Yandex Disk</option>
+        </select>
+
+        <button type="submit" disabled>Submit (coming soon)</button>
+      </form>
+    </main>
+  </div>
+</body>
+</html>
