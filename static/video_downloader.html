@@ -20,9 +20,9 @@
     </header>
 
     <main class="tool-layout">
-      <form class="tool-form">
+      <form class="tool-form" id="info-form">
         <label for="url">Source URL</label>
-        <input id="url" name="url" type="url" placeholder="https://..." disabled>
+        <input id="url" name="url" type="url" placeholder="https://..." required>
 
         <label for="destination">Destination</label>
         <select id="destination" disabled>
@@ -31,9 +31,28 @@
           <option>Yandex Disk</option>
         </select>
 
-        <button type="submit" disabled>Submit (coming soon)</button>
+        <button type="submit" id="fetch-btn">Fetch details</button>
       </form>
+
+      <p class="error" id="error" hidden></p>
+
+      <section class="video-result" id="result" hidden>
+        <div class="video-summary">
+          <img id="thumb" class="thumb" alt="">
+          <div>
+            <h2 id="video-title"></h2>
+            <p class="meta" id="video-meta"></p>
+          </div>
+        </div>
+        <table class="formats-table">
+          <thead>
+            <tr><th>Resolution</th><th>Format</th><th>Audio</th><th>Size</th></tr>
+          </thead>
+          <tbody id="formats-body"></tbody>
+        </table>
+      </section>
     </main>
   </div>
+  <script src="/assets/app.js"></script>
 </body>
 </html>
