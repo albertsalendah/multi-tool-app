@@ -29,6 +29,7 @@ def fetch_video_info(url: str) -> dict:
         "duration_string": raw.get("duration_string") or _format_duration(duration),
         "extractor": raw.get("extractor_key"),
         "formats": _select_formats(raw.get("formats") or []),
+        "audio_formats": _select_audio_formats(raw.get("formats") or []),
     }
 
 
@@ -54,22 +55,52 @@ def _select_formats(raw_formats):
         size = f.get("filesize") or f.get("filesize_approx")
         existing = best_by_res.get(key)
 
-        if existing is None or (size and not existing["_size"]):
+        if existing is None or (size and not existing["filesize"]):
             best_by_res[key] = {
                 "format_id": f.get("format_id"),
                 "ext": f.get("ext"),
                 "resolution": f.get("format_note")
                 or (f"{f.get('width')}x{height}" if height else "unknown"),
                 "has_audio": f.get("acodec") not in (None, "none"),
+                "filesize": size,
                 "filesize_display": _human_size(size),
-                "_size": size,
                 "_height": height or 0,
             }
 
     formats = sorted(best_by_res.values(), key=lambda x: x["_height"], reverse=True)
     for f in formats:
-        f.pop("_size", None)
         f.pop("_height", None)
+    return formats
+
+
+def _select_audio_formats(raw_formats):
+    """Audio-only streams (the tracks that get merged into video-only
+    downloads), one entry per bitrate tier, sorted best-first."""
+    best_by_abr = {}
+    for f in raw_formats:
+        if f.get("vcodec") not in (None, "none"):
+            continue  # has video, not an audio-only track
+        if f.get("acodec") in (None, "none"):
+            continue  # no audio either — a video-only entry, skip
+
+        abr = f.get("abr")
+        key = abr or f.get("format_id")
+        size = f.get("filesize") or f.get("filesize_approx")
+        existing = best_by_abr.get(key)
+
+        if existing is None or (size and not existing["filesize"]):
+            best_by_abr[key] = {
+                "format_id": f.get("format_id"),
+                "ext": f.get("ext"),
+                "bitrate_display": f"{int(abr)} kbps" if abr else "unknown bitrate",
+                "filesize": size,
+                "filesize_display": _human_size(size),
+                "_abr": abr or 0,
+            }
+
+    formats = sorted(best_by_abr.values(), key=lambda x: x["_abr"], reverse=True)
+    for f in formats:
+        f.pop("_abr", None)
     return formats
 
 

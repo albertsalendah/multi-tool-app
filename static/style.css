@@ -265,3 +265,26 @@ h1 {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
+
+.section-label {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 20px 0 8px;
+}
+
+.section-label:first-of-type {
+  margin-top: 0;
+}
+
+.audio-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  max-width: 100%;
+}
