@@ -288,3 +288,96 @@ h1 {
   font-size: 13px;
   max-width: 100%;
 }
+
+.secondary-btn {
+  margin-top: 14px;
+  background: transparent;
+  border: 1px solid var(--border-hover);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.secondary-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.secondary-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Interactive Stream Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 18, 22, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 960px;
+  padding: 20px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  color: var(--accent);
+}
+
+.modal-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 16px;
+}
+
+.canvas-wrapper {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-hover);
+  cursor: crosshair;
+}
+
+#stream-canvas {
+  display: block;
+  width: 100%;
+  min-height: 480px; /* Prevents collapsed bar before first frame renders */
+  background: #111;
+  user-select: none;
+  object-fit: contain;
+}
+
+.canvas-loader {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--accent);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  pointer-events: none;
+}

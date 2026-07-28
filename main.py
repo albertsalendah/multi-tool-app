@@ -5,12 +5,20 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from video_downloader.router import router as video_downloader_router
+from fastapi.middleware.cors import CORSMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="Multi-Tool App")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows extension fetches
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # Each tool contributes its own router. Adding a new tool later means:
 # 1. new_tool/router.py with its own APIRouter
 # 2. one include_router() line here

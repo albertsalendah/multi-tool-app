@@ -1,115 +1,80 @@
+# video_downloader/extractor.py
+from typing import Any, Dict, Optional
 import yt_dlp
 
 
 class VideoInfoError(Exception):
-    """Raised when a source URL can't be read (unsupported site, dead link,
-    network failure, etc). Routers translate this into a clean 4xx response
-    instead of a 500."""
+    """Custom exception raised when video info fetching fails."""
+    pass
 
 
-def fetch_video_info(url: str) -> dict:
+def _human_size(num_bytes: Optional[int]) -> str:
+    if not num_bytes:
+        return "Unknown"
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if abs(num_bytes) < 1024.0:
+            return f"{num_bytes:.1f} {unit}"
+        num_bytes /= 1024.0
+    return f"{num_bytes:.1f} PB"
+
+
+def fetch_video_info(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    cookies: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
-        "skip_download": True,
-        "noplaylist": True,
+        "extract_flat": False,
     }
+
+    if headers:
+        ydl_opts["http_headers"] = headers
+
+    # If cookies dictionary was passed, inject cookie string header
+    if cookies and "http_headers" not in ydl_opts:
+        cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+        ydl_opts["http_headers"] = {"Cookie": cookie_str}
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            raw = ydl.extract_info(url, download=False)
-    except yt_dlp.utils.DownloadError as exc:
-        raise VideoInfoError(f"Could not read that URL: {exc}") from exc
+            info = ydl.extract_info(url, download=False)
+            if info is None:
+                raise VideoInfoError("Could not retrieve video details.")
 
-    duration = raw.get("duration")
+            # Filter formats
+            formats = []
+            audio_formats = []
 
-    return {
-        "title": raw.get("title"),
-        "thumbnail": raw.get("thumbnail"),
-        "duration": duration,
-        "duration_string": raw.get("duration_string") or _format_duration(duration),
-        "extractor": raw.get("extractor_key"),
-        "formats": _select_formats(raw.get("formats") or []),
-        "audio_formats": _select_audio_formats(raw.get("formats") or []),
-    }
+            for fmt in info.get("formats", []):
+                vcodec = fmt.get("vcodec", "none")
+                acodec = fmt.get("acodec", "none")
+                filesize = fmt.get("filesize") or fmt.get("filesize_approx")
 
+                format_data = {
+                    "format_id": fmt.get("format_id"),
+                    "ext": fmt.get("ext", "mp4"),
+                    "resolution": fmt.get("format_note") or f"{fmt.get('height', 'unknown')}p",
+                    "filesize": filesize,
+                    "filesize_display": _human_size(filesize),
+                    "has_audio": acodec != "none",
+                }
 
-def _format_duration(seconds):
-    if not seconds:
-        return None
-    seconds = int(seconds)
-    h, rem = divmod(seconds, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+                if vcodec != "none":
+                    formats.append(format_data)
+                elif acodec != "none":
+                    format_data["bitrate_display"] = f"{int(fmt.get('tbr', 0))} kbps"
+                    audio_formats.append(format_data)
 
-
-def _select_formats(raw_formats):
-    """Video-capable formats only, one entry per resolution (prefers the
-    variant with a known filesize), sorted best-first."""
-    best_by_res = {}
-    for f in raw_formats:
-        if f.get("vcodec") in (None, "none"):
-            continue  # audio-only stream, not a "quality to download"
-
-        height = f.get("height")
-        key = height or f.get("format_note") or f.get("format_id")
-        size = f.get("filesize") or f.get("filesize_approx")
-        existing = best_by_res.get(key)
-
-        if existing is None or (size and not existing["filesize"]):
-            best_by_res[key] = {
-                "format_id": f.get("format_id"),
-                "ext": f.get("ext"),
-                "resolution": f.get("format_note")
-                or (f"{f.get('width')}x{height}" if height else "unknown"),
-                "has_audio": f.get("acodec") not in (None, "none"),
-                "filesize": size,
-                "filesize_display": _human_size(size),
-                "_height": height or 0,
+            return {
+                "title": info.get("title", "Untitled"),
+                "duration_string": info.get("duration_string") or f"{info.get('duration', 0)}s",
+                "extractor": info.get("extractor_key", "Generic"),
+                "thumbnail": info.get("thumbnail"),
+                "formats": formats,
+                "audio_formats": audio_formats,
             }
 
-    formats = sorted(best_by_res.values(), key=lambda x: x["_height"], reverse=True)
-    for f in formats:
-        f.pop("_height", None)
-    return formats
-
-
-def _select_audio_formats(raw_formats):
-    """Audio-only streams (the tracks that get merged into video-only
-    downloads), one entry per bitrate tier, sorted best-first."""
-    best_by_abr = {}
-    for f in raw_formats:
-        if f.get("vcodec") not in (None, "none"):
-            continue  # has video, not an audio-only track
-        if f.get("acodec") in (None, "none"):
-            continue  # no audio either — a video-only entry, skip
-
-        abr = f.get("abr")
-        key = abr or f.get("format_id")
-        size = f.get("filesize") or f.get("filesize_approx")
-        existing = best_by_abr.get(key)
-
-        if existing is None or (size and not existing["filesize"]):
-            best_by_abr[key] = {
-                "format_id": f.get("format_id"),
-                "ext": f.get("ext"),
-                "bitrate_display": f"{int(abr)} kbps" if abr else "unknown bitrate",
-                "filesize": size,
-                "filesize_display": _human_size(size),
-                "_abr": abr or 0,
-            }
-
-    formats = sorted(best_by_abr.values(), key=lambda x: x["_abr"], reverse=True)
-    for f in formats:
-        f.pop("_abr", None)
-    return formats
-
-
-def _human_size(num_bytes):
-    if not num_bytes:
-        return "Unknown"
-    size = float(num_bytes)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024:
-            return f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size:.1f} TB"
+    except Exception as exc:
+        raise VideoInfoError(f"Extraction failed: {exc}") from exc
