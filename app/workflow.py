@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from threading import RLock
 from typing import Any
 
 # ==========================================================
@@ -12,26 +13,37 @@ from typing import Any
 class WorkflowState:
     """
     Shared data available to every step in a workflow.
+
+    Access is lock-protected because ParallelGroup branches may read
+    and write state concurrently from different threads.
     """
 
     def __init__(self):
         self._data: dict[str, Any] = {}
+        self._lock = RLock()
 
     def set(self, key: str, value: Any):
-        self._data[key] = value
+        with self._lock:
+            self._data[key] = value
 
     def get(self, key: str, default=None):
-        return self._data.get(key, default)
+        with self._lock:
+            return self._data.get(key, default)
 
     def has(self, key: str):
-        return key in self._data
+        with self._lock:
+            return key in self._data
 
     def clear(self):
-        self._data.clear()
+        with self._lock:
+            self._data.clear()
 
     @property
     def data(self):
-        return self._data
+        # Snapshot rather than a live reference, since callers (e.g. the
+        # condition evaluator) iterate this outside of the lock.
+        with self._lock:
+            return dict(self._data)
 
 
 # ==========================================================
@@ -68,10 +80,10 @@ class WorkflowStep(WorkflowNode):
 @dataclass(slots=True)
 class ParallelGroup(WorkflowNode):
 
-    steps: list[WorkflowStep] = field(default_factory=list)
+    steps: list[WorkflowNode] = field(default_factory=list)
 
-    def add(self, step: WorkflowStep):
-        self.steps.append(step)
+    def add(self, node: WorkflowNode):
+        self.steps.append(node)
 
     def __iter__(self):
         return iter(self.steps)
