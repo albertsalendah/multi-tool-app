@@ -6,6 +6,10 @@ from app.browser_manager import BrowserManager
 from app.config import Config
 from app.logger import Logger
 from app.container import ServiceContainer
+from app.permission_manager import PermissionManager
+from app.execution_context import ExecutionContext
+from app.scheduler import Scheduler
+
 
 class ApplicationKernel:
     def __init__(self):
@@ -16,21 +20,23 @@ class ApplicationKernel:
             console=self.config.get("logging.console", True),
             file_output=self.config.get("logging.file_output", True),
         )
+        self.permissions = PermissionManager()
         self.container = ServiceContainer()
         self.registry = ToolRegistry()
+        self.browser = BrowserManager()
+        self._initialized = False
+        self.events = EventBus()
         self.jobs = JobManager(
             event_bus=self.events,
             max_workers=self.config.get("jobs.max_workers", 4),
         )
-        self.browser = BrowserManager()
-        self._initialized = False
-        self.events = EventBus()
+        self.scheduler = Scheduler(self.jobs)
 
     def initialize(self):
         if self._initialized:
             return
         log = self.logger.logger
-
+        self.container.register("permissions", self.permissions)
         self.browser.initialize(headless=self.config.get("browser.headless", True))
         self.registry.discover_tools()
 
@@ -72,6 +78,7 @@ class ApplicationKernel:
         self.container.register("logger", self.logger)
         self.container.register("events", self.events)
         self.container.register("jobs", self.jobs)
+        self.container.register("scheduler", self.scheduler)
         self.container.register("browser", self.browser)
         self.container.register("registry", self.registry)
 
@@ -79,6 +86,7 @@ class ApplicationKernel:
         if not self._initialized:
             return
 
+        self.scheduler.shutdown()
         self.jobs.shutdown()
         self.browser.shutdown()
 
@@ -91,9 +99,29 @@ class ApplicationKernel:
         return self.registry.get_tool(name)
 
     def run_tool(self, name: str, background: bool = False, **kwargs):
+        manifest = self.registry.get_manifest(name)
+
+        self.permissions.validate(
+            manifest,
+            self.container,
+        )
         tool = self.get_tool(name)
 
+        context = (
+            ExecutionContext(
+                tool_name=name,
+                services=self.container,
+                request=kwargs,
+            )
+            if background
+            else ExecutionContext.for_foreground(
+                tool_name=name,
+                services=self.container,
+                request=kwargs,
+            )
+        )
         kwargs.setdefault("services", self.container)
+        kwargs.setdefault("context", context)
 
         self.events.emit(
             "tool.started",
@@ -101,7 +129,7 @@ class ApplicationKernel:
         )
 
         if background:
-            return self.jobs.submit(tool.run, **kwargs)
+            return self.jobs.submit(lambda: tool.run(**kwargs), context=context)
 
         result = tool.run(**kwargs)
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, Future
-from curses import wrapper
 from enum import Enum
 from threading import Lock
 from uuid import uuid4
+
+from app.cancellation import CancellationRequested, CancellationToken
+from app.execution_context import ExecutionContext
 
 
 class JobStatus(str, Enum):
@@ -16,9 +18,19 @@ class JobStatus(str, Enum):
 
 
 class Job:
-    def __init__(self, future: Future):
+    def __init__(
+        self,
+        future: Future | None,
+        context: ExecutionContext | None = None,
+    ):
         self.id = str(uuid4())
         self.future = future
+        self.context = context
+        if self.context:
+            self.context.bind_job(self.id)
+            self.cancellation_token = self.context.cancellation_token
+        else:
+            self.cancellation_token = CancellationToken()
         self.status = JobStatus.PENDING
         self.result = None
         self.error = None
@@ -32,8 +44,14 @@ class JobManager:
         self._lock = Lock()
         self._events = event_bus
 
-    def submit(self, func, *args, **kwargs) -> str:
-        job = Job(None)
+    def submit(
+        self,
+        func,
+        *args,
+        context: ExecutionContext | None = None,
+        **kwargs,
+    ) -> str:
+        job = Job(None, context=context)
 
         def wrapper():
             job.status = JobStatus.RUNNING
@@ -43,7 +61,14 @@ class JobManager:
                     job_id=job.id,
                 )
             try:
+                job.cancellation_token.raise_if_cancelled()
                 result = func(*args, **kwargs)
+
+                if job.cancellation_token.is_cancelled():
+                    job.status = JobStatus.CANCELLED
+                    if self._events:
+                        self._events.emit("job.cancelled", job_id=job.id)
+                    return result
 
                 job.result = result
                 job.progress = 100
@@ -53,8 +78,15 @@ class JobManager:
                         "job.completed",
                         job_id=job.id,
                         result=result,
-                    )
+                )
                 return result
+
+            except CancellationRequested as exc:
+                job.error = str(exc)
+                job.status = JobStatus.CANCELLED
+                if self._events:
+                    self._events.emit("job.cancelled", job_id=job.id)
+                return None
 
             except Exception as e:
                 job.error = str(e)
@@ -66,9 +98,6 @@ class JobManager:
                         error=str(e),
                     )
                 raise
-
-        future = self._executor.submit(wrapper)
-        job.future = future
 
         with self._lock:
             self._jobs[job.id] = job
@@ -88,12 +117,21 @@ class JobManager:
         job = self.get(job_id)
         return job.result if job else None
 
+    def context(self, job_id: str) -> ExecutionContext | None:
+        job = self.get(job_id)
+        return job.context if job else None
+
     def cancel(self, job_id: str) -> bool:
         job = self.get(job_id)
 
-        if job is None:
+        if job is None or job.status in {
+            JobStatus.COMPLETED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        }:
             return False
 
+        requested = job.cancellation_token.cancel()
         cancelled = job.future.cancel()
 
         if cancelled:
@@ -105,7 +143,7 @@ class JobManager:
                     job_id=job.id,
                 )
 
-        return cancelled
+        return requested
 
     def list_jobs(self):
         return list(self._jobs.values())
