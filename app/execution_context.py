@@ -78,3 +78,58 @@ class ExecutionContext:
     def state_snapshot(self) -> Mapping[str, Any]:
         with self._lock:
             return MappingProxyType(dict(self._state))
+
+    def report_progress(
+        self,
+        progress: int,
+        message: str = "",
+    ):
+        self.events.emit(
+            "tool.progress",
+            tool=self.tool_name,
+            progress=progress,
+            message=message,
+            job_id=self.job_id,
+        )
+
+        self.set_state("progress", progress)
+
+    def log_debug(self, message: str):
+        self.logger.debug(message)
+
+    def log_info(self, message: str):
+        self.logger.info(message)
+
+    def log_warning(self, message: str):
+        self.logger.warning(message)
+
+    def log_error(self, message: str):
+        self.logger.error(message)
+
+    @property
+    def browser(self):
+        return self.get_service("browser")
+
+    @property
+    def logger(self):
+        return self.get_service("logger").logger
+
+    @property
+    def events(self):
+        return self.get_service("events")
+
+    @property
+    def config(self):
+        return self.get_service("config")
+
+    @property
+    def jobs(self):
+        return self.get_service("jobs")
+
+    @property
+    def scheduler(self):
+        return self.get_service("scheduler")
+
+    @property
+    def registry(self):
+        return self.get_service("registry")

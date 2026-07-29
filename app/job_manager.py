@@ -78,7 +78,7 @@ class JobManager:
                         "job.completed",
                         job_id=job.id,
                         result=result,
-                )
+                    )
                 return result
 
             except CancellationRequested as exc:
@@ -147,6 +147,19 @@ class JobManager:
 
     def list_jobs(self):
         return list(self._jobs.values())
+
+    def wait(self, job_id: str, timeout=None):
+        job = self.get(job_id)
+
+        if job is None:
+            return None
+
+        return job.future.result(timeout=timeout)
+
+    def is_finished(self, job_id: str):
+        job = self.get(job_id)
+
+        return job.future.done() if job else False
 
     def shutdown(self):
         self._executor.shutdown(wait=True)

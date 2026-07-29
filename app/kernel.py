@@ -9,6 +9,7 @@ from app.container import ServiceContainer
 from app.permission_manager import PermissionManager
 from app.execution_context import ExecutionContext
 from app.scheduler import Scheduler
+from app.workflow_engine import WorkflowEngine
 
 
 class ApplicationKernel:
@@ -31,6 +32,7 @@ class ApplicationKernel:
             max_workers=self.config.get("jobs.max_workers", 4),
         )
         self.scheduler = Scheduler(self.jobs)
+        self.workflow = WorkflowEngine(self)
 
     def initialize(self):
         if self._initialized:
@@ -81,6 +83,10 @@ class ApplicationKernel:
         self.container.register("scheduler", self.scheduler)
         self.container.register("browser", self.browser)
         self.container.register("registry", self.registry)
+        self.container.register(
+            "workflow",
+            self.workflow,
+        )
 
     def shutdown(self):
         if not self._initialized:
@@ -120,8 +126,7 @@ class ApplicationKernel:
                 request=kwargs,
             )
         )
-        kwargs.setdefault("services", self.container)
-        kwargs.setdefault("context", context)
+        kwargs["context"] = context
 
         self.events.emit(
             "tool.started",
@@ -140,3 +145,13 @@ class ApplicationKernel:
         )
 
         return result
+
+    def run_workflow(
+        self,
+        workflow,
+        background=False,
+    ):
+        return self.workflow.execute(
+            workflow,
+            background=background,
+        )
