@@ -1,0 +1,16 @@
+app:
+  name: Multi Tool App
+  debug: false
+
+browser:
+  headless: true
+  timeout: 30000
+
+jobs:
+  max_workers: 4
+
+logging:
+  level: INFO
+  file: logs/app.log
+  console: true
+  file_output: true

@@ -3,11 +3,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from video_downloader.extractor import VideoInfoError, fetch_video_info
+from tools.video_downloader.extractor import VideoInfoError, fetch_video_info
 
 # --- ENGINE SELECTION ---
 # Switch between SeleniumBase and Patchright by changing this import:
-from video_downloader.selenium_detector import (
+from tools.video_downloader.selenium_detector import (
     get_session_status,
     start_session,
 )

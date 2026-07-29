@@ -8,8 +8,8 @@ from seleniumbase import Driver
 from seleniumbase import SB
 
 # from video_downloader.captcha_solver import resolve_captcha_and_access
-from video_downloader.stream_extractor import extract_stream_from_logs
-from captcha_manager import CaptchaManager
+from tools.video_downloader.stream_extractor import extract_stream_from_logs
+from libraries.captcha_manager.manager import CaptchaManager
 
 SESSIONS: Dict[str, dict] = {}
 
