@@ -1,6 +1,6 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-yt-dlp
-playwright
-playwright-stealth
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+seleniumbase>=4.25.0
+yt-dlp>=2024.3.10
+starlette>=0.36.0
 curl_cffi

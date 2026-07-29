@@ -1,11 +1,29 @@
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from video_downloader.router import router as video_downloader_router
-from fastapi.middleware.cors import CORSMiddleware
+
+# --------------------------------------------------------------------------
+# Suppress status polling logs from uvicorn.access
+# --------------------------------------------------------------------------
+class EndpointLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Check if record has arguments (record.args holds method, path, etc.)
+        if record.args and len(record.args) >= 3:
+            path = str(record.args[2])
+            # Exclude status polling requests
+            if "/session/" in path and "/status" in path:
+                return False
+        return True
+
+# Apply the filter to Uvicorn's access logger
+logging.getLogger("uvicorn.access").addFilter(EndpointLogFilter())
+# --------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"

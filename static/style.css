@@ -326,6 +326,7 @@ h1 {
   justify-content: center;
   z-index: 9999;
 }
+.modal-overlay[hidden] { display: none; }
 
 .modal-card {
   background: var(--surface);

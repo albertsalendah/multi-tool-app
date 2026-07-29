@@ -8,10 +8,6 @@ let lastUrl = "";
 let activeSessionId = null;
 let streamPollInterval = null;
 
-const modal = document.getElementById("turnstile-modal");
-const streamCanvas = document.getElementById("stream-canvas");
-const canvasLoader = document.getElementById("canvas-loader");
-
 if (detectBtn) {
   detectBtn.hidden = false;
 }
@@ -44,7 +40,6 @@ if (form) {
   });
 }
 
-// Single handler for generic detection modal
 if (detectBtn) {
   detectBtn.addEventListener("click", async () => {
     const urlInput = document.getElementById("url");
@@ -58,7 +53,7 @@ if (detectBtn) {
 
     errorEl.hidden = true;
     detectBtn.disabled = true;
-    detectBtn.textContent = "Detecting... (interactive session)";
+    detectBtn.textContent = "Browser opened... solve challenge if prompted";
 
     try {
       await startInteractiveSession(url);
@@ -72,73 +67,34 @@ if (detectBtn) {
   });
 }
 
-// Canvas coordinate click handler
-if (streamCanvas) {
-  streamCanvas.addEventListener("click", async (e) => {
-    if (!activeSessionId) return;
-
-    const rect = streamCanvas.getBoundingClientRect();
-    const scaleX = streamCanvas.naturalWidth / rect.width;
-    const scaleY = streamCanvas.naturalHeight / rect.height;
-
-    const clickX = Math.round((e.clientX - rect.left) * scaleX);
-    const clickY = Math.round((e.clientY - rect.top) * scaleY);
-
-    if (canvasLoader) canvasLoader.hidden = false;
-
-    try {
-      await fetch(`/tools/video-downloader/session/${activeSessionId}/click`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x: clickX, y: clickY }),
-      });
-    } catch (err) {
-      console.error("Click dispatch error:", err);
-    }
-  });
-}
-
 async function startInteractiveSession(url) {
-  modal.hidden = false;
-
   const res = await fetch(`/tools/video-downloader/detect-interactive?url=${encodeURIComponent(url)}`, { method: "POST" });
   const session = await res.json();
 
   if (!res.ok) {
-    modal.hidden = true;
     throw new Error(session.detail || "Failed to launch detector.");
   }
 
   activeSessionId = session.session_id;
 
   streamPollInterval = setInterval(async () => {
-  try {
-    const statusRes = await fetch(`/tools/video-downloader/session/${activeSessionId}/status`);
-    const data = await statusRes.json();
+    try {
+      const statusRes = await fetch(`/tools/video-downloader/session/${activeSessionId}/status`);
+      const data = await statusRes.json();
 
-    // Fix: Only set src when base64 string actually contains image data!
-    if (data.screenshot && data.screenshot.length > 0) {
-      streamCanvas.src = `data:image/jpeg;base64,${data.screenshot}`;
-    }
-
-    if (canvasLoader) canvasLoader.hidden = true;
-
-    if (data.status === "completed") {
+      if (data.status === "completed") {
+        clearInterval(streamPollInterval);
+        renderResult(data.result);
+      } else if (data.status === "failed") {
+        clearInterval(streamPollInterval);
+        throw new Error(data.error || "Detection failed.");
+      }
+    } catch (err) {
       clearInterval(streamPollInterval);
-      modal.hidden = true;
-      renderResult(data.result);
-    } else if (data.status === "failed") {
-      clearInterval(streamPollInterval);
-      modal.hidden = true;
-      throw new Error(data.error || "Detection failed.");
+      errorEl.textContent = err.message;
+      errorEl.hidden = false;
     }
-  } catch (err) {
-    clearInterval(streamPollInterval);
-    modal.hidden = true;
-    errorEl.textContent = err.message;
-    errorEl.hidden = false;
-  }
-}, 800);
+  }, 1000);
 }
 
 let currentAudioFormats = [];
@@ -240,53 +196,3 @@ function renderResult(data) {
 
   resultEl.hidden = false;
 }
-
-// Poll extension-captured streams
-async function pollCapturedStreams() {
-  try {
-    const res = await fetch('/tools/video-downloader/recent-streams');
-    const streams = await res.json();
-
-    let container = document.getElementById('captured-streams-banner');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'captured-streams-banner';
-      container.style.cssText = 'margin: 1rem 0; padding: 1rem; background: #1e293b; border-radius: 8px; border: 1px solid #22c55e;';
-      const formEl = document.querySelector('form') || document.body;
-      formEl.prepend(container);
-    }
-
-    if (streams.length === 0) {
-      container.style.display = 'none';
-      return;
-    }
-
-    container.style.display = 'block';
-    const latest = streams[streams.length - 1];
-
-    container.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-          <strong style="color: #22c55e; font-size: 15px;">🎬 ${latest.page_title}</strong>
-          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px; word-break: break-all;">
-            ${latest.stream_url}
-          </div>
-        </div>
-        <button type="button" id="use-captured-btn" style="padding: 6px 12px; background: #22c55e; color: #000; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; margin-left: 12px;">
-          Use Link
-        </button>
-      </div>
-    `;
-
-    document.getElementById('use-captured-btn').onclick = () => {
-      const input = document.querySelector('input[name="url"]') || document.querySelector('#url');
-      if (input) {
-        input.value = latest.stream_url;
-      }
-    };
-  } catch (err) {
-    console.error("Error polling streams:", err);
-  }
-}
-
-setInterval(pollCapturedStreams, 2000);

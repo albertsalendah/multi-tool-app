@@ -1,12 +1,7 @@
 # Multi-Tool App
 
 Personal web app: download video/files from various sources and push them to
-a cloud storage provider of choice. Storage and processing backends are
-swappable by design — see `project_handover.md` context for the full
-architecture plan (not included in this repo).
-
-Currently implemented: the app shell (tool grid + routing) and the Video
-Downloader tool's layout. No extraction or upload logic yet — that's next.
+a cloud storage provider of choice. Storage and processing backends 
 
 ## Run locally
 

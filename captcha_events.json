@@ -1,0 +1,81 @@
+[
+    {
+        "time": "2026-07-29 17:41:42",
+        "detected": true,
+        "types": [
+            "recaptcha"
+        ],
+        "confidence": 13,
+        "solver_attempted": false,
+        "solved": false,
+        "remaining": false,
+        "manual_required": true,
+        "duration": 2.332288980484009,
+        "url_before": "https://www.google.com/recaptcha/api2/demo",
+        "url_after": "",
+        "metadata": {
+            "iframes": [
+                {
+                    "name": "a-5x0cge6zsi6u",
+                    "src": "https://www.google.com/recaptcha/api2/anchor?ar=1&k=6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-&co=aHR0cHM6Ly93d3cuZ29vZ2xlLmNvbTo0NDM.&hl=en&v=A7KpaEASfhDcK0nXxgQEyyYv&size=normal&sa=action&anchor-ms=20000&execute-ms=30000&cb=83anhxeb1ptz",
+                    "title": "reCAPTCHA"
+                },
+                {
+                    "name": "",
+                    "src": "",
+                    "title": ""
+                }
+            ]
+        }
+    },
+    {
+        "time": "2026-07-29 17:43:05",
+        "detected": true,
+        "types": [
+            "recaptcha",
+            "hcaptcha",
+            "aws_waf"
+        ],
+        "confidence": 21,
+        "solver_attempted": false,
+        "solved": false,
+        "remaining": false,
+        "manual_required": true,
+        "duration": 2.46551513671875,
+        "url_before": "https://accounts.hcaptcha.com/demo",
+        "url_after": "",
+        "metadata": {
+            "iframes": [
+                {
+                    "name": "",
+                    "src": "https://newassets.hcaptcha.com/captcha/v1/494ae5ee0caca30cfa99514c266b501a90fa268a/static/hcaptcha.html#frame=checkbox&id=0ax7dkam9d79&host=accounts.hcaptcha.com&sentry=true&reportapi=https%3A%2F%2Faccounts.hcaptcha.com&recaptchacompat=true&custom=False&hl=en&tplinks=on&andint=off&pstissuer=https%3A%2F%2Fpst-issuer.hcaptcha.com&sitekey=a5f74b19-9e45-40e0-b45d-47ff91b7a6c2&theme=light&origin=https%3A%2F%2Faccounts.hcaptcha.com&clientOptions=%7B%22sentry%22%3Atrue%2C%22reportapi%22%3A%22https%3A%2F%2Faccounts.hcaptcha.com%22%2C%22recaptchacompat%22%3A%22true%22%2C%22custom%22%3A%22False%22%2C%22hl%22%3A%22en-US%22%2C%22tplinks%22%3A%22on%22%2C%22andint%22%3A%22off%22%2C%22pat%22%3A%22on%22%2C%22pstissuer%22%3A%22https%3A%2F%2Fpst-issuer.hcaptcha.com%22%2C%22endpoint%22%3A%22https%3A%2F%2Fapi.hcaptcha.com%22%2C%22theme%22%3A%22light%22%2C%22size%22%3A%22normal%22%2C%22confirm-nav%22%3Afalse%7D",
+                    "title": "Widget containing checkbox for hCaptcha security challenge"
+                },
+                {
+                    "name": "",
+                    "src": "https://newassets.hcaptcha.com/captcha/v1/494ae5ee0caca30cfa99514c266b501a90fa268a/static/hcaptcha.html#frame=challenge&id=0ax7dkam9d79&host=accounts.hcaptcha.com&sentry=true&reportapi=https%3A%2F%2Faccounts.hcaptcha.com&recaptchacompat=true&custom=False&hl=en&tplinks=on&andint=off&pstissuer=https%3A%2F%2Fpst-issuer.hcaptcha.com&sitekey=a5f74b19-9e45-40e0-b45d-47ff91b7a6c2&theme=light&origin=https%3A%2F%2Faccounts.hcaptcha.com&clientOptions=%7B%22sentry%22%3Atrue%2C%22reportapi%22%3A%22https%3A%2F%2Faccounts.hcaptcha.com%22%2C%22recaptchacompat%22%3A%22true%22%2C%22custom%22%3A%22False%22%2C%22hl%22%3A%22en-US%22%2C%22tplinks%22%3A%22on%22%2C%22andint%22%3A%22off%22%2C%22pat%22%3A%22on%22%2C%22pstissuer%22%3A%22https%3A%2F%2Fpst-issuer.hcaptcha.com%22%2C%22endpoint%22%3A%22https%3A%2F%2Fapi.hcaptcha.com%22%2C%22theme%22%3A%22light%22%2C%22size%22%3A%22normal%22%2C%22confirm-nav%22%3Afalse%7D",
+                    "title": "hCaptcha challenge"
+                }
+            ]
+        }
+    },
+    {
+        "time": "2026-07-29 18:01:49",
+        "detected": true,
+        "types": [
+            "cloudflare"
+        ],
+        "confidence": 6,
+        "solver_attempted": true,
+        "solved": true,
+        "remaining": false,
+        "manual_required": false,
+        "duration": 6.2598876953125,
+        "url_before": "https://yomi.to/watch/135865/2",
+        "url_after": "https://yomi.to/watch/135865/2",
+        "metadata": {
+            "iframes": [],
+            "solver_time": 2.9322941303253174
+        }
+    }
+]
