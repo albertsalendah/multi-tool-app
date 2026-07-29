@@ -9,5 +9,12 @@ class BaseTool(ABC):
     description: str = ""
 
     @abstractmethod
-    def run(self, **kwargs):
-        pass
+    def run(self, *, context=None, **kwargs):
+        """Run the tool.
+
+        ``context`` is an optional ExecutionContext supplied by the platform.
+        Existing tools may continue to use ``services`` and other keyword
+        arguments while they are migrated. Long-running tools should call
+        ``context.raise_if_cancelled()`` at safe interruption points.
+        """
+        raise NotImplementedError

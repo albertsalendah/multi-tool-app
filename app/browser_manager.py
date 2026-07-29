@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from playwright.sync_api import sync_playwright, Browser, BrowserContext, Playwright
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Browser, BrowserContext, Playwright
 
 
 class BrowserManager:
@@ -11,6 +14,8 @@ class BrowserManager:
     def initialize(self, headless: bool = True):
         if self._browser is not None:
             return
+
+        from playwright.sync_api import sync_playwright
 
         self._playwright = sync_playwright().start()
 
