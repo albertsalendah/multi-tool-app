@@ -1,31 +1,46 @@
-# Multi-Tool App
+# Multi Tool App
 
-Personal web app: download video/files from various sources and push them to
-a cloud storage provider of choice. Storage and processing backends 
+> **A Modular Automation Processing Platform**
 
-## Run locally
+## Vision
+Multi Tool App is an extensible platform for browser-powered and non-browser-powered automation tools. The platform provides reusable infrastructure so each tool can focus on its own business logic.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
+## Core Principles
+- Platform First
+- Job-Based Execution
+- Plugin-Oriented Architecture
+- Provider Agnostic
+- Temporary Processing
+- Event-Driven Design
+- Secure by Default
 
-Visit http://127.0.0.1:8000
+## Planned Platform Services
+- Application Kernel
+- Tool Registry & Plugin Discovery
+- Job Manager
+- Browser Manager
+- CAPTCHA Manager (Shared Library)
+- Output Manager
+- Storage Manager
+- Credential Vault
+- Authentication
+- Event Bus
+- Resource Manager
 
-## Run with Docker
+## Tool Philosophy
+Every feature is implemented as a Tool. The platform owns orchestration while tools perform work.
 
-```bash
-docker build -t multi-tool-app .
-docker run -p 8000:8000 multi-tool-app
-```
+## Storage Philosophy
+Processed files are temporary. Users may:
+1. Download directly.
+2. Upload to a linked cloud storage provider.
+3. Have temporary files automatically cleaned up.
 
-## Adding a new tool
+## Documentation
+This repository contains architecture documentation under `docs/` (to be added during the architecture freeze).
 
-1. Create `<tool_name>/router.py` with its own `APIRouter`.
-2. `include_router()` it in `main.py`.
-3. Add a card for it in `static/index.html` linking to its route.
+## Roadmap
+Current focus: Architecture Freeze → Platform Refactor → Core Services → Tool Migration → Feature Development.
 
-No other file needs to change — this is the adapter-style pattern the
-project is built around.
+## License
+TBD
