@@ -131,6 +131,10 @@ class ApplicationKernel:
     def list_tools(self):
         return self.registry.list_tools()
 
+    @property
+    def is_initialized(self) -> bool:
+        return self._initialized
+
     def get_tool(self, name: str):
         return self.registry.get_tool(name)
 
