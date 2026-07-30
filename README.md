@@ -40,7 +40,11 @@ Processed files are temporary. Users may:
 This repository contains architecture documentation under `docs/` (to be added during the architecture freeze).
 
 ## Roadmap
-Current focus: Architecture Freeze → Platform Refactor → Core Services → Tool Migration → Feature Development.
+Completed: Architecture Freeze, Platform Refactor, Core Services
+(Kernel, Registry, Job Manager, Browser Manager, Event Bus, Execution
+Context, Scheduler), Workflow Engine, Plugin SDK, REST API.
+Current focus: CLI (as a REST API client). See `docs/STATUS.md` for
+the full checklist and `docs/ARCHITECTURE_CHANGELOG.md` for details.
 
 ## License
 TBD
