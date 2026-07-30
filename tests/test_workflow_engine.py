@@ -69,6 +69,30 @@ def _kernel_with_tools(*tools) -> ApplicationKernel:
     return kernel
 
 
+class _EventCollector:
+    """Subscribes to every workflow.* event and records (name, payload)
+    in emission order, so tests can assert on the full event timeline."""
+
+    EVENTS = ("workflow.started", "workflow.progress", "workflow.completed", "workflow.failed")
+
+    def __init__(self, kernel: ApplicationKernel):
+        self.records: list[tuple[str, dict]] = []
+
+        for event in self.EVENTS:
+            # default arg binds `event` per-iteration instead of by
+            # closure reference (classic late-binding lambda pitfall).
+            kernel.events.subscribe(
+                event,
+                lambda event=event, **payload: self.records.append((event, payload)),
+            )
+
+    def names(self) -> list[str]:
+        return [name for name, _ in self.records]
+
+    def payloads(self, event: str) -> list[dict]:
+        return [payload for name, payload in self.records if name == event]
+
+
 # --------------------------------------------------------------------------
 # Linear execution: state wiring, variable substitution, conditions
 # --------------------------------------------------------------------------
@@ -261,3 +285,185 @@ def test_nested_parallel_group_is_flattened_by_the_engine():
     results = kernel.workflow.execute(wf)
 
     assert sorted(results) == ["inner-1", "inner-2", "outer-1"]
+
+
+# --------------------------------------------------------------------------
+# Workflow Events: started / progress / completed / failed
+# --------------------------------------------------------------------------
+
+
+def test_successful_workflow_emits_started_progress_and_completed():
+    kernel = _kernel_with_tools(EchoTool())
+    collector = _EventCollector(kernel)
+    wf = Workflow("events-success")
+
+    wf.add_step("echo", value="a", result_as="a")
+    wf.add_step("echo", value="b", result_as="b")
+
+    kernel.workflow.execute(wf)
+
+    # started, progress, progress, completed - in that order.
+    assert collector.names() == [
+        "workflow.started",
+        "workflow.progress",
+        "workflow.progress",
+        "workflow.completed",
+    ]
+
+    started = collector.payloads("workflow.started")[0]
+    assert started["workflow"] == "events-success"
+    assert started["total_steps"] == 2
+    assert started["background"] is False
+
+    progress = collector.payloads("workflow.progress")
+    assert [p["completed"] for p in progress] == [1, 2]
+    assert [p["total"] for p in progress] == [2, 2]
+    assert [p["percent"] for p in progress] == [50, 100]
+    assert [p["status"] for p in progress] == ["succeeded", "succeeded"]
+    assert [p["tool"] for p in progress] == ["echo", "echo"]
+
+    completed = collector.payloads("workflow.completed")[0]
+    assert completed["workflow"] == "events-success"
+    assert completed["result_count"] == 2
+    assert completed["duration"] >= 0
+
+    # No workflow.failed should ever fire on a clean run.
+    assert "workflow.failed" not in collector.names()
+
+
+def test_all_four_events_share_the_same_execution_id():
+    kernel = _kernel_with_tools(EchoTool())
+    collector = _EventCollector(kernel)
+    wf = Workflow("events-correlation")
+
+    wf.add_step("echo", value=1)
+
+    kernel.workflow.execute(wf)
+
+    execution_ids = {payload["execution_id"] for _, payload in collector.records}
+    assert len(execution_ids) == 1
+
+
+def test_two_executions_of_the_same_workflow_get_different_execution_ids():
+    kernel = _kernel_with_tools(EchoTool())
+    collector = _EventCollector(kernel)
+    wf = Workflow("events-rerun")
+
+    wf.add_step("echo", value=1)
+
+    kernel.workflow.execute(wf)
+    kernel.workflow.execute(wf)
+
+    started = collector.payloads("workflow.started")
+    assert len(started) == 2
+    assert started[0]["execution_id"] != started[1]["execution_id"]
+
+
+def test_condition_skip_reports_skipped_progress_status():
+    kernel = _kernel_with_tools(EchoTool())
+    collector = _EventCollector(kernel)
+    wf = Workflow("events-skip")
+
+    wf.add_step("echo", value=1, condition="1 > 2")
+
+    kernel.workflow.execute(wf)
+
+    progress = collector.payloads("workflow.progress")
+    assert len(progress) == 1
+    assert progress[0]["status"] == "skipped"
+    assert progress[0]["completed"] == 1
+    assert progress[0]["total"] == 1
+
+
+def test_continue_on_error_reports_failed_ignored_status_and_still_completes():
+    kernel = _kernel_with_tools(AlwaysFailTool())
+    collector = _EventCollector(kernel)
+    wf = Workflow("events-soft-failure")
+
+    wf.add_step("always_fail", continue_on_error=True)
+
+    kernel.workflow.execute(wf)
+
+    progress = collector.payloads("workflow.progress")
+    assert progress[0]["status"] == "failed_ignored"
+    assert collector.names()[-1] == "workflow.completed"
+    assert "workflow.failed" not in collector.names()
+
+
+def test_hard_failure_emits_failed_progress_status_then_workflow_failed():
+    kernel = _kernel_with_tools(AlwaysFailTool())
+    collector = _EventCollector(kernel)
+    wf = Workflow("events-hard-failure")
+
+    wf.add_step("always_fail")
+
+    try:
+        kernel.workflow.execute(wf)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Expected the step failure to propagate.")
+
+    progress = collector.payloads("workflow.progress")
+    assert progress[0]["status"] == "failed"
+
+    assert collector.names() == [
+        "workflow.started",
+        "workflow.progress",
+        "workflow.failed",
+    ]
+
+    failed = collector.payloads("workflow.failed")[0]
+    assert "boom" in failed["error"]
+    assert failed["duration"] >= 0
+
+
+def test_parallel_group_progress_counts_every_branch_exactly_once():
+    kernel = _kernel_with_tools(EchoTool())
+    collector = _EventCollector(kernel)
+    wf = Workflow("events-parallel-progress")
+
+    with wf.parallel():
+        wf.add_step("echo", value="a")
+        wf.add_step("echo", value="b")
+        wf.add_step("echo", value="c")
+
+    kernel.workflow.execute(wf)
+
+    started = collector.payloads("workflow.started")[0]
+    assert started["total_steps"] == 3
+
+    progress = collector.payloads("workflow.progress")
+    assert len(progress) == 3
+    # Branches run concurrently, so completion order isn't guaranteed, but
+    # the shared counter must still hand out 1, 2, 3 with no duplicates
+    # or gaps, and the final event must reach 100%.
+    assert sorted(p["completed"] for p in progress) == [1, 2, 3]
+    assert progress[-1]["percent"] == 100
+
+    assert collector.names()[0] == "workflow.started"
+    assert collector.names()[-1] == "workflow.completed"
+
+
+def test_parallel_group_failure_still_emits_progress_for_every_branch():
+    kernel = _kernel_with_tools(EchoTool(), AlwaysFailTool())
+    collector = _EventCollector(kernel)
+    wf = Workflow("events-parallel-failure")
+
+    with wf.parallel():
+        wf.add_step("echo", value="ok")
+        wf.add_step("always_fail")
+
+    try:
+        kernel.workflow.execute(wf)
+    except WorkflowGroupError:
+        pass
+    else:
+        raise AssertionError("Expected WorkflowGroupError.")
+
+    # Both branches ran to completion (per the group's run-to-completion
+    # contract), so both should have reported progress before the group
+    # error surfaced and workflow.failed fired.
+    progress = collector.payloads("workflow.progress")
+    assert sorted(p["status"] for p in progress) == ["failed", "succeeded"]
+    assert collector.names()[-1] == "workflow.failed"

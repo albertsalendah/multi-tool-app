@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+import time
 from copy import deepcopy
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 from app.workflow import ParallelGroup, Workflow, WorkflowStep
 
@@ -33,6 +35,30 @@ def _node_label(node) -> str:
     if isinstance(node, WorkflowStep):
         return node.tool
     return "parallel_group"
+
+
+class _ProgressTracker:
+    """
+    Per-execution, thread-safe counter of completed leaf steps.
+
+    A single tracker is shared across an entire execute() call, including
+    every branch of every ParallelGroup, so `workflow.progress` events
+    reflect progress across the whole workflow rather than one branch.
+    """
+
+    __slots__ = ("total", "completed", "workflow_name", "execution_id", "_lock")
+
+    def __init__(self, total: int, workflow_name: str, execution_id: str):
+        self.total = total
+        self.completed = 0
+        self.workflow_name = workflow_name
+        self.execution_id = execution_id
+        self._lock = Lock()
+
+    def increment(self) -> int:
+        with self._lock:
+            self.completed += 1
+            return self.completed
 
 
 class WorkflowEngine:
@@ -112,11 +138,27 @@ class WorkflowEngine:
                 timeout=step.timeout,
             )
 
+    def _report_step_progress(self, tracker: _ProgressTracker, step: WorkflowStep, outcome: str):
+        completed = tracker.increment()
+        percent = int((completed / tracker.total) * 100) if tracker.total else 100
+
+        self.kernel.events.emit(
+            "workflow.progress",
+            workflow=tracker.workflow_name,
+            execution_id=tracker.execution_id,
+            tool=step.tool,
+            status=outcome,
+            completed=completed,
+            total=tracker.total,
+            percent=percent,
+        )
+
     def _execute_step(
         self,
         step: WorkflowStep,
         workflow: Workflow,
         background: bool,
+        tracker: _ProgressTracker,
     ) -> list:
         """Run a single step with its condition/retry/continue_on_error rules.
 
@@ -124,40 +166,51 @@ class WorkflowEngine:
         uniformly `.extend()` regardless of node type.
         """
 
-        if not self._evaluate_condition(step.condition, workflow):
-            return []
+        outcome = "skipped"
 
-        attempt = 0
+        try:
 
-        while True:
+            if not self._evaluate_condition(step.condition, workflow):
+                return []
 
-            try:
+            attempt = 0
 
-                result = self._run_step(step, workflow, background)
+            while True:
 
-                if step.result_as:
-                    workflow.state.set(step.result_as, result)
+                try:
 
-                return [result]
+                    result = self._run_step(step, workflow, background)
 
-            except Exception:
-                # concurrent.futures.TimeoutError is an Exception subclass,
-                # so it's already covered here.
+                    if step.result_as:
+                        workflow.state.set(step.result_as, result)
 
-                if attempt >= step.retry:
+                    outcome = "succeeded"
+                    return [result]
 
-                    if step.continue_on_error:
-                        return []
+                except Exception:
+                    # concurrent.futures.TimeoutError is an Exception subclass,
+                    # so it's already covered here.
 
-                    raise
+                    if attempt >= step.retry:
 
-            attempt += 1
+                        if step.continue_on_error:
+                            outcome = "failed_ignored"
+                            return []
+
+                        outcome = "failed"
+                        raise
+
+                attempt += 1
+
+        finally:
+            self._report_step_progress(tracker, step, outcome)
 
     def _execute_group(
         self,
         group: ParallelGroup,
         workflow: Workflow,
         background: bool,
+        tracker: _ProgressTracker,
     ) -> list:
         """Run every branch of a ParallelGroup concurrently.
 
@@ -173,7 +226,7 @@ class WorkflowEngine:
 
         def run_branch(index: int, node) -> None:
             try:
-                result = self._execute_node(node, workflow, background)
+                result = self._execute_node(node, workflow, background, tracker)
 
                 with lock:
                     branch_results[index] = result
@@ -208,12 +261,27 @@ class WorkflowEngine:
         node,
         workflow: Workflow,
         background: bool,
+        tracker: _ProgressTracker,
     ) -> list:
 
         if isinstance(node, ParallelGroup):
-            return self._execute_group(node, workflow, background)
+            return self._execute_group(node, workflow, background, tracker)
 
-        return self._execute_step(node, workflow, background)
+        return self._execute_step(node, workflow, background, tracker)
+
+    def _count_steps(self, nodes) -> int:
+        """Recursively count leaf WorkflowSteps, including inside nested
+        ParallelGroups, so progress percentages are accurate up front."""
+
+        total = 0
+
+        for node in nodes:
+            if isinstance(node, ParallelGroup):
+                total += self._count_steps(node.steps)
+            else:
+                total += 1
+
+        return total
 
     def execute(
         self,
@@ -221,9 +289,44 @@ class WorkflowEngine:
         background=False,
     ):
 
-        results = []
+        execution_id = str(uuid4())
+        total = self._count_steps(workflow.nodes)
+        tracker = _ProgressTracker(total, workflow.name, execution_id)
 
-        for node in workflow:
-            results.extend(self._execute_node(node, workflow, background))
+        self.kernel.events.emit(
+            "workflow.started",
+            workflow=workflow.name,
+            execution_id=execution_id,
+            total_steps=total,
+            background=background,
+        )
+
+        start = time.perf_counter()
+
+        try:
+            results = []
+
+            for node in workflow:
+                results.extend(
+                    self._execute_node(node, workflow, background, tracker)
+                )
+
+        except Exception as exc:
+            self.kernel.events.emit(
+                "workflow.failed",
+                workflow=workflow.name,
+                execution_id=execution_id,
+                duration=time.perf_counter() - start,
+                error=str(exc),
+            )
+            raise
+
+        self.kernel.events.emit(
+            "workflow.completed",
+            workflow=workflow.name,
+            execution_id=execution_id,
+            duration=time.perf_counter() - start,
+            result_count=len(results),
+        )
 
         return results

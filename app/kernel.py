@@ -76,6 +76,35 @@ class ApplicationKernel:
             ),
         )
 
+        self.events.subscribe(
+            "workflow.started",
+            lambda workflow, execution_id, total_steps, background: log.info(
+                f"Workflow started: {workflow} ({execution_id}) - {total_steps} step(s)"
+            ),
+        )
+
+        self.events.subscribe(
+            "workflow.progress",
+            lambda workflow, execution_id, tool, status, completed, total, percent: log.info(
+                f"[{workflow}] {percent}% ({completed}/{total}) - {tool}: {status}"
+            ),
+        )
+
+        self.events.subscribe(
+            "workflow.completed",
+            lambda workflow, execution_id, duration, result_count: log.info(
+                f"Workflow completed: {workflow} ({execution_id}) - "
+                f"{result_count} result(s) in {duration:.2f}s"
+            ),
+        )
+
+        self.events.subscribe(
+            "workflow.failed",
+            lambda workflow, execution_id, duration, error: log.error(
+                f"Workflow failed: {workflow} ({execution_id}) - {error}"
+            ),
+        )
+
         self.container.register("config", self.config)
         self.container.register("logger", self.logger)
         self.container.register("events", self.events)
