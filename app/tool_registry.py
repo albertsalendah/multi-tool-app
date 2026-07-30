@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import pkgutil
 import json
 from pathlib import Path
@@ -10,6 +11,8 @@ from app.plugin import PluginManifest
 
 from tools import __path__ as tools_path
 from tools.base_tool import BaseTool
+
+log = logging.getLogger("MultiToolApp")
 
 
 class ToolRegistry:
@@ -25,32 +28,41 @@ class ToolRegistry:
             if not is_pkg:
                 continue
 
-            tool_dir = Path(tools_path[0]) / module_name
-            manifest_path = tool_dir / "manifest.json"
+            try:
+                self._load_tool(module_name)
+            except Exception as exc:
+                # A single broken plugin (bad manifest.json, missing
+                # entry point, import error, etc.) should not prevent
+                # every other tool from loading.
+                log.warning(f"Skipping tool '{module_name}': {exc}")
 
-            if not manifest_path.exists():
-                continue
+    def _load_tool(self, module_name: str):
+        tool_dir = Path(tools_path[0]) / module_name
+        manifest_path = tool_dir / "manifest.json"
 
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = PluginManifest(**json.load(f))
+        if not manifest_path.exists():
+            return
 
-            if not manifest.enabled:
-                continue
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = PluginManifest(**json.load(f))
 
-            module_name_str, class_name = manifest.entry.split(":")
+        if not manifest.enabled:
+            return
 
-            module = importlib.import_module(f"tools.{module_name}.{module_name_str}")
+        module_name_str, class_name = manifest.entry.split(":")
 
-            cls = getattr(module, class_name)
+        module = importlib.import_module(f"tools.{module_name}.{module_name_str}")
 
-            if not issubclass(cls, BaseTool):
-                continue
+        cls = getattr(module, class_name)
 
-            tool = cls()
+        if not issubclass(cls, BaseTool):
+            raise TypeError(f"'{manifest.entry}' does not subclass BaseTool")
 
-            self.register(tool)
+        tool = cls()
 
-            self._manifests[manifest.id] = manifest
+        self.register(tool)
+
+        self._manifests[manifest.id] = manifest
 
     def get_manifest(self, tool_id: str):
         return self._manifests[tool_id]

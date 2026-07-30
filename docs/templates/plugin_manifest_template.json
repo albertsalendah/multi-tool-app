@@ -1,12 +1,10 @@
 {
-  "name": "example_tool",
-  "display_name": "Example Tool",
+  "id": "example_tool",
+  "name": "Example Tool",
   "version": "1.0.0",
-  "author": "Your Name",
   "description": "Describe your tool.",
-  "entry_point": "tool.py",
-  "capabilities": [],
-  "requires_browser": false,
-  "requires_authentication": false,
-  "enabled": true
+  "author": "Your Name",
+  "entry": "tool:ExampleTool",
+  "enabled": true,
+  "capabilities": []
 }

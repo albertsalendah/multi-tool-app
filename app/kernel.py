@@ -10,6 +10,7 @@ from app.permission_manager import PermissionManager
 from app.execution_context import ExecutionContext
 from app.scheduler import Scheduler
 from app.workflow_engine import WorkflowEngine
+from tools.base_tool import ToolValidationError
 
 
 class ApplicationKernel:
@@ -133,6 +134,25 @@ class ApplicationKernel:
     def get_tool(self, name: str):
         return self.registry.get_tool(name)
 
+    def _run_tool_lifecycle(self, tool, context, kwargs):
+        """initialize() -> validate() -> run() -> cleanup(), for one
+        execution. cleanup() always runs, even if validate() rejects the
+        request or run() raises - mirrors ADR-0002's per-job resource
+        lifecycle, not a one-time app-startup thing."""
+
+        tool.initialize(context)
+
+        try:
+            if not tool.validate(context.request):
+                raise ToolValidationError(
+                    f"Validation failed for tool '{context.tool_name}'."
+                )
+
+            return tool.run(**kwargs)
+
+        finally:
+            tool.cleanup(context)
+
     def run_tool(self, name: str, background: bool = False, **kwargs):
         manifest = self.registry.get_manifest(name)
 
@@ -163,9 +183,12 @@ class ApplicationKernel:
         )
 
         if background:
-            return self.jobs.submit(lambda: tool.run(**kwargs), context=context)
+            return self.jobs.submit(
+                lambda: self._run_tool_lifecycle(tool, context, kwargs),
+                context=context,
+            )
 
-        result = tool.run(**kwargs)
+        result = self._run_tool_lifecycle(tool, context, kwargs)
 
         self.events.emit(
             "tool.finished",
