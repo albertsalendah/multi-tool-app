@@ -26,10 +26,14 @@ if (form) {
     btn.textContent = "Fetching...";
 
     try {
-      const res = await fetch(`/tools/video-downloader/info?url=${encodeURIComponent(url)}`);
+      const res = await fetch("/api/v1/tools/video_downloader/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ params: { url } }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Could not fetch video info.");
-      renderResult(data);
+      renderResult(data.result);
     } catch (err) {
       errorEl.textContent = err.message;
       errorEl.hidden = false;

@@ -87,9 +87,37 @@
   there's no streaming/SSE endpoint yet, so polling is what "wait for
   a job" means today.
 
+### Web UI Reconciliation (fast path only - Stage 1)
+- Added `POST /api/v1/tools/{name}/run`: runs a tool synchronously and
+  returns its result directly, for fast tools where job creation +
+  polling would be pure overhead. Refuses (400) any tool declaring the
+  `browser` capability, since those can run long (e.g. manual CAPTCHA
+  solving) - `POST /jobs` is for those.
+- `VideoDownloaderTool.run()` was a stub (did nothing, returned
+  `None`); it now actually calls `fetch_video_info()` and returns the
+  result. Added `validate()` (rejects requests with no `url`).
+  Narrowed its manifest's `capabilities` from
+  `["browser", "network", "filesystem"]` to `["network"]` - the fast
+  path touches neither a browser nor the filesystem.
+- `static/app.js`'s "Fetch details" button now calls
+  `POST /api/v1/tools/video_downloader/run` instead of the
+  tool-specific `GET /tools/video-downloader/info`, which was removed
+  from `router.py` as redundant.
+- Found and fixed while touching `router.py`: `STATIC_DIR` was missing
+  one `.parent` and pointed at the nonexistent `tools/static/`, so
+  `GET /tools/video-downloader` (the page itself) 500'd on every
+  request. Unrelated to this task's actual goal, just adjacent and
+  broken.
+- The interactive/CAPTCHA path (`detect-interactive`,
+  `session/{id}/status`, the "Try generic detection" button) is
+  untouched - still bypasses the Kernel, still broken exactly as
+  before. That's Stage 2, see Current Focus and Known Technical Debt.
+
 ### Current Focus
-Desktop UI. No streaming/live-progress endpoint exists yet - both the
-REST API and the CLI are poll-only for job status.
+Stage 2 of the web UI reconciliation: the interactive/CAPTCHA path.
+Blocked on resolving Playwright vs. SeleniumBase first - see Known
+Technical Debt. No streaming/live-progress endpoint exists yet - the
+REST API and CLI are poll-only for job status.
 
 ### Known Technical Debt
 - ~~Fix JobManager submit race condition~~ - fixed: `submit()` was
@@ -98,6 +126,10 @@ REST API and the CLI are poll-only for job status.
 - ~~Add cooperative cancellation token~~ - done, see "Cancellation
   Token" above (this item was stale - the token already existed by the
   time it was still listed here).
+- ~~`tools/video_downloader/router.py` bypasses `kernel.run_tool()`~~ -
+  fixed for the fast info-lookup path (see "Web UI Reconciliation"
+  above). Still true for the interactive/CAPTCHA path - see the next
+  few items, all still open.
 - Make Job updates thread-safe - `Job.status` / `.result` / `.error` /
   `.progress` are still set without a lock in `JobManager`.
 - Add immutable job snapshots - still open. `GET /jobs/{id}` gives a
@@ -117,12 +149,8 @@ REST API and the CLI are poll-only for job status.
 - Two unreconciled browser stacks: `app/browser_manager.py`
   (Playwright) vs. `selenium_detector.py` (SeleniumBase) - neither
   `ExecutionContext.browser` nor `Capability.BROWSER` touches what the
-  tool actually drives.
+  tool actually drives. This blocks Stage 2 and needs deciding first.
 - `libraries/captcha_manager` is fully built but never registered as a
   platform service; `Capability.CAPTCHA` is currently a no-op
   permission check.
-- `tools/video_downloader/router.py` bypasses `kernel.run_tool()`
-  entirely, so the Execution Context / Permission / Job Manager layer
-  (and now the REST API) is inert for the one real tool in the app.
-  All of the above `video_downloader`-specific items are intentionally
-  deferred until the platform framework itself is further along.
+

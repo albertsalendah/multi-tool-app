@@ -22,11 +22,19 @@
 - [x] REST API (/api/v1: health, tools, jobs)
 - [x] CLI (installable `multitool` console script, REST API client -
       pip install -e .)
+- [x] Web UI fast-path reconciliation - GET /tools/video-downloader/info
+      replaced by POST /api/v1/tools/video_downloader/run, going
+      through the Kernel/Plugin SDK lifecycle instead of bypassing it
 
 ## Current Milestone
-Desktop UI
+Reconcile the interactive/CAPTCHA path in static/video_downloader.html
+with the REST API - blocked on resolving the Playwright vs SeleniumBase
+question first (see ARCHITECTURE_CHANGELOG.md's technical debt list).
+The fast info-lookup path is done (see Completed).
 
 ## Next Milestones
-- Desktop UI
-- Browser Pool
+- Interactive/CAPTCHA path reconciliation (Stage 2) - requires fixing
+  selenium_detector.py's session pipeline, stream_extractor.py's stale
+  import, and picking one browser stack
 - Real Tools (beyond video_downloader)
+- Desktop UI / Mobile app - deferred until the web app is solid

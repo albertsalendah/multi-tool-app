@@ -42,9 +42,12 @@ This repository contains architecture documentation under `docs/` (to be added d
 ## Roadmap
 Completed: Architecture Freeze, Platform Refactor, Core Services
 (Kernel, Registry, Job Manager, Browser Manager, Event Bus, Execution
-Context, Scheduler), Workflow Engine, Plugin SDK, REST API, CLI.
-Current focus: Desktop UI. See `docs/STATUS.md` for the full checklist
-and `docs/ARCHITECTURE_CHANGELOG.md` for details.
+Context, Scheduler), Workflow Engine, Plugin SDK, REST API, CLI, and
+the web UI's fast-path reconciliation with the REST API.
+Current focus: the interactive/CAPTCHA path (Stage 2 of the web UI
+reconciliation) - blocked on a Playwright-vs-SeleniumBase decision.
+See `docs/STATUS.md` for the full checklist and
+`docs/ARCHITECTURE_CHANGELOG.md` for details.
 
 ## License
 TBD

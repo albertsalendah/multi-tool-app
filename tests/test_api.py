@@ -29,10 +29,10 @@ class CooperativeTool(BaseTool):
             time.sleep(0.005)
 
 
-def _register(kernel: ApplicationKernel, tool: BaseTool):
+def _register(kernel: ApplicationKernel, tool: BaseTool, capabilities: list[str] = None):
     kernel.registry.register(tool)
     kernel.registry._manifests[tool.name] = type(
-        "Manifest", (), {"capabilities": []}
+        "Manifest", (), {"capabilities": capabilities or []}
     )()
 
 
@@ -166,3 +166,79 @@ def test_cancel_stops_a_running_cooperative_job():
         assert response.json()["status"] == "cancelled"
     finally:
         kernel.jobs.shutdown()
+
+
+# --------------------------------------------------------------------------
+# POST /api/v1/tools/{name}/run
+# --------------------------------------------------------------------------
+
+
+class BrowserTool(BaseTool):
+    """Declares the 'browser' capability - used to test that the sync
+    endpoint refuses to run it (see app/api.py's run_tool_sync guard)."""
+
+    name = "browser_tool"
+
+    def run(self, *, context=None, **kwargs):
+        return "should never get here"
+
+
+class RaisingRuntimeTool(BaseTool):
+    name = "raising_runtime"
+
+    def run(self, *, context=None, **kwargs):
+        raise RuntimeError("bad input")
+
+
+def test_run_sync_returns_the_tool_result_directly():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    response = client.post("/api/v1/tools/echo/run", json={"params": {"value": 99}})
+
+    assert response.status_code == 200
+    assert response.json() == {"result": 99}
+
+
+def test_run_sync_unknown_tool_returns_404():
+    kernel = ApplicationKernel()
+    client = _client_with_kernel(kernel)
+
+    response = client.post("/api/v1/tools/nope/run", json={"params": {}})
+
+    assert response.status_code == 404
+
+
+def test_run_sync_refuses_a_tool_that_declares_browser_capability():
+    kernel = ApplicationKernel()
+    _register(kernel, BrowserTool(), capabilities=["browser"])
+    client = _client_with_kernel(kernel)
+
+    response = client.post("/api/v1/tools/browser_tool/run", json={"params": {}})
+
+    assert response.status_code == 400
+    assert "browser" in response.json()["detail"]
+    assert "/jobs" in response.json()["detail"]
+
+
+def test_run_sync_maps_tool_runtime_error_to_400():
+    kernel = ApplicationKernel()
+    _register(kernel, RaisingRuntimeTool())
+    client = _client_with_kernel(kernel)
+
+    response = client.post("/api/v1/tools/raising_runtime/run", json={"params": {}})
+
+    assert response.status_code == 400
+    assert "bad input" in response.json()["detail"]
+
+
+def test_run_sync_defaults_params_to_empty_dict():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    response = client.post("/api/v1/tools/echo/run", json={})
+
+    assert response.status_code == 200
+    assert response.json() == {"result": None}

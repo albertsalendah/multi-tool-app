@@ -2,14 +2,12 @@
     "id": "video_downloader",
     "name": "Video Downloader",
     "version": "1.0.0",
-    "description": "Download videos from supported websites.",
+    "description": "Look up video/quality info from a source URL (yt-dlp based, no browser required).",
     "author": "Richard Salendah",
     "entry": "tool:VideoDownloaderTool",
     "enabled": true,
 
     "capabilities": [
-        "browser",
-        "network",
-        "filesystem"
+        "network"
     ]
 }

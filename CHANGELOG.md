@@ -32,6 +32,13 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
 - CLI: installable `multitool` console script (`pip install -e .`),
   a REST API client covering health, tool listing, and the full job
   lifecycle (create/get/cancel, with optional polling via `--wait`).
+- Web UI (fast path): `POST /api/v1/tools/{name}/run` added for
+  synchronous tool execution. `video_downloader`'s info-lookup now
+  goes through the Kernel/Plugin SDK lifecycle instead of a bespoke
+  endpoint that bypassed it entirely; its manifest capabilities were
+  narrowed to match what it actually does. Also fixed an unrelated bug
+  found in the process: `GET /tools/video-downloader` (the page
+  itself) was 500ing on every request due to a wrong static-file path.
 - Test suite covering all of the above (`tests/`).
 
 ### Known limitations

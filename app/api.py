@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.capabilities import Capability
 from app.kernel import ApplicationKernel
 
 router = APIRouter(prefix="/api/v1", tags=["platform-api"])
@@ -63,6 +64,17 @@ class JobResponse(BaseModel):
 class CancelJobResponse(BaseModel):
     job_id: str
     cancelled: bool
+
+
+class RunToolRequest(BaseModel):
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Keyword arguments passed through to the tool's run().",
+    )
+
+
+class RunToolResponse(BaseModel):
+    result: Any = None
 
 
 # --------------------------------------------------------------------------
@@ -125,3 +137,39 @@ def cancel_job(job_id: str, kernel: ApplicationKernel = Depends(get_kernel)):
     cancelled = kernel.jobs.cancel(job_id)
 
     return CancelJobResponse(job_id=job_id, cancelled=cancelled)
+
+
+@router.post("/tools/{name}/run", response_model=RunToolResponse)
+def run_tool_sync(
+    name: str,
+    body: RunToolRequest,
+    kernel: ApplicationKernel = Depends(get_kernel),
+):
+    """Run a tool synchronously and return its result directly - for
+    fast, non-browser tools where job creation + polling would be pure
+    overhead. Long-running/interactive tools (declared 'browser'
+    capability) are refused here; use POST /jobs for those instead."""
+
+    try:
+        manifest = kernel.registry.get_manifest(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: '{name}'")
+
+    if Capability.BROWSER in manifest.capabilities:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Tool '{name}' requires the 'browser' capability and may "
+                "run for a long time (e.g. manual CAPTCHA solving) - use "
+                "POST /jobs instead of this synchronous endpoint."
+            ),
+        )
+
+    try:
+        result = kernel.run_tool(name, background=False, **body.params)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: '{name}'")
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return RunToolResponse(result=result)

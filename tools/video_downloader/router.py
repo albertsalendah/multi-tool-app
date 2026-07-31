@@ -1,9 +1,7 @@
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter
 from fastapi.responses import FileResponse
-
-from tools.video_downloader.extractor import VideoInfoError, fetch_video_info
 
 # --- ENGINE SELECTION ---
 # Switch between SeleniumBase and Patchright by changing this import:
@@ -18,7 +16,10 @@ from tools.video_downloader.selenium_detector import (
 #     get_session_status,
 # )
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+# tools/video_downloader/router.py -> tools/video_downloader -> tools -> repo
+# root, then /static. (Previously missing one .parent - pointed at the
+# nonexistent tools/static and made GET /tools/video-downloader 500.)
+STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
 
 router = APIRouter(prefix="/tools/video-downloader", tags=["video-downloader"])
 
@@ -28,16 +29,12 @@ async def layout():
     return FileResponse(STATIC_DIR / "video_downloader.html")
 
 
-@router.get("/info")
-def get_info(url: str = Query(..., description="Source video URL")):
-    try:
-        return fetch_video_info(url)
-    except VideoInfoError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to fetch video info: {exc}"
-        ) from exc
+# The fast info-lookup path (formerly GET /info here) now goes through the
+# Kernel via POST /api/v1/tools/video_downloader/run - see
+# tools/video_downloader/tool.py and static/app.js. This router now only
+# serves the page and the interactive/CAPTCHA session endpoints below,
+# which still bypass the Kernel - reconciling those is a separate, larger
+# piece of work (see docs/ARCHITECTURE_CHANGELOG.md's technical debt list).
 
 
 # --------------------------------------------------------------------------
@@ -49,3 +46,4 @@ router.post("/detect-interactive")(start_session)
 
 # 2. Map GET /session/{session_id}/status directly to get_session_status
 router.get("/session/{session_id}/status")(get_session_status)
+
