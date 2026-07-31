@@ -29,6 +29,9 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
 - REST API (`/api/v1`): `GET /health`, `GET /tools`, `POST /jobs`,
   `GET /jobs/{id}`, `DELETE /jobs/{id}` - the Kernel is now reachable
   over HTTP, not just in-process.
+- CLI: installable `multitool` console script (`pip install -e .`),
+  a REST API client covering health, tool listing, and the full job
+  lifecycle (create/get/cancel, with optional polling via `--wait`).
 - Test suite covering all of the above (`tests/`).
 
 ### Known limitations

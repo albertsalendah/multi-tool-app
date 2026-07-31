@@ -20,13 +20,13 @@
 - [x] Workflow Events (workflow.started/progress/completed/failed)
 - [x] Plugin SDK (real initialize/validate/run/cleanup lifecycle, resilient discovery)
 - [x] REST API (/api/v1: health, tools, jobs)
+- [x] CLI (installable `multitool` console script, REST API client -
+      pip install -e .)
 
 ## Current Milestone
-Implement CLI (as a REST API client - talks to a running server over HTTP,
-does not embed the kernel in-process)
+Desktop UI
 
 ## Next Milestones
-- CLI
 - Desktop UI
 - Browser Pool
 - Real Tools (beyond video_downloader)

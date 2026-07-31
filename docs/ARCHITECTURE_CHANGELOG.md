@@ -22,6 +22,7 @@
 - Workflow Events
 - Plugin SDK
 - REST API
+- CLI
 
 ### Shared Context / Execution Context
 - Added a per-execution context with job and tool identity.
@@ -73,11 +74,22 @@
   module-level `app` at all, so `Dockerfile`'s `CMD` (`uvicorn
   main:app`) would have failed to start the container as configured.
 
+### CLI
+- Added an installable `multitool` console script (`pip install -e .`)
+  built as a REST API client, not an in-process Kernel driver - it
+  talks to a running server the same way the static UI does, rather
+  than embedding the Kernel itself. Kept deliberately separate from
+  `requirements.txt`/the server's dependency stack: the CLI only needs
+  `httpx`, not `playwright`/`seleniumbase`/`yt-dlp`.
+- Commands: `health`, `tools list`, `jobs create --tool NAME [--param
+  KEY=VALUE...] [--wait]`, `jobs get JOB_ID`, `jobs cancel JOB_ID`.
+- `jobs create --wait` polls `GET /jobs/{id}` until a terminal status -
+  there's no streaming/SSE endpoint yet, so polling is what "wait for
+  a job" means today.
+
 ### Current Focus
-Implement CLI, as a REST API client (talks to a running server over
-HTTP; does not embed the Kernel in-process). Live progress is
-poll-only for now (`GET /jobs/{id}`) - no streaming/SSE/WebSocket
-endpoint exists yet.
+Desktop UI. No streaming/live-progress endpoint exists yet - both the
+REST API and the CLI are poll-only for job status.
 
 ### Known Technical Debt
 - ~~Fix JobManager submit race condition~~ - fixed: `submit()` was
