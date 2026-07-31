@@ -8,6 +8,7 @@ shared/
 docs/
 static/
 tests/
+cli/
 ```
 
 - app: platform core
@@ -15,3 +16,5 @@ tests/
 - libraries: reusable packages
 - shared: infrastructure helpers
 - tests: automated test suite (pytest)
+- cli: REST API client (`pip install -e .`, console script `multitool`).
+  Talks to a running server over HTTP - does not embed the Kernel.
