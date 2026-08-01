@@ -39,6 +39,12 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
   narrowed to match what it actually does. Also fixed an unrelated bug
   found in the process: `GET /tools/video-downloader` (the page
   itself) was 500ing on every request due to a wrong static-file path.
+- Browser stack decided: SeleniumBase, replacing Playwright entirely.
+  `Browser Manager` rewritten to `acquire()`/`release()`/`shutdown()`
+  session semantics (SeleniumBase has no shared-process model to
+  initialize up front, unlike Playwright). Removed from
+  `requirements.txt`; `Dockerfile`'s browser install step now installs
+  real Google Chrome + a matching chromedriver instead.
 - Test suite covering all of the above (`tests/`).
 
 ### Known limitations

@@ -113,11 +113,48 @@
   untouched - still bypasses the Kernel, still broken exactly as
   before. That's Stage 2, see Current Focus and Known Technical Debt.
 
+### Browser Stack Decision: SeleniumBase
+- Decided SeleniumBase over Playwright, since `libraries/captcha_manager`
+  was already built assuming SeleniumBase's API (`sb.cdp.*`,
+  `sb.solve_captcha()`) - aligning with that instead of fighting it.
+- `app/browser_manager.py` rewritten from a Playwright
+  Browser/BrowserContext model to `acquire()` / `release()` /
+  `shutdown()`, matching what `docs/implementation/BROWSER_MANAGER.md`
+  already (aspirationally) documented. SeleniumBase's `SB()` is a
+  per-session context manager, not a shared browser process you can
+  cheaply open sub-contexts from, so each `acquire()` starts a
+  genuinely new session via `SB(...).__enter__()` / `.__exit__()` -
+  confirmed valid against the real installed library, not assumed.
+  No pooling yet - that's still the separate "Browser Pool" roadmap
+  item, deliberately not pulled into this change.
+- `kernel.py`: dropped the `browser.initialize()` call entirely -
+  there's nothing to pre-launch anymore. `BrowserManager` now takes
+  `default_headless` from config at construction time, matching how
+  `Logger` already pulls primitive config values the same way.
+- Playwright removed entirely: `requirements.txt`, and
+  `Dockerfile`'s browser install step replaced with real Google Chrome
+  (not Debian's Chromium build - `uc=True` undetected-chromedriver
+  mode, used for CAPTCHA-solving, is calibrated against actual Chrome
+  and is more detectable running on Chromium's different fingerprint)
+  plus `seleniumbase install chromedriver`. **Not verified with a real
+  Docker build** - no Docker daemon and no network access to
+  `dl.google.com` from the sandbox this was built in. Best-informed
+  effort based on documented SeleniumBase/Chrome deployment patterns;
+  needs a real build to confirm.
+- Also cleaned up while in the area: `router.py`'s stale "ENGINE
+  SELECTION" comment implying a live Playwright/SeleniumBase choice
+  (and referencing a `video_downloader.interactive_detector` module
+  that doesn't exist in the current directory structure anyway).
+
 ### Current Focus
-Stage 2 of the web UI reconciliation: the interactive/CAPTCHA path.
-Blocked on resolving Playwright vs. SeleniumBase first - see Known
-Technical Debt. No streaming/live-progress endpoint exists yet - the
-REST API and CLI are poll-only for job status.
+Now that the browser stack is decided, finish Stage 2 of the web UI
+reconciliation: fix `selenium_detector.py`'s session pipeline and
+`stream_extractor.py`'s stale import, rebuild interactive detection as
+a real `BaseTool` through `kernel.run_tool()`/the Job Manager instead
+of its own `SESSIONS` dict, and rewire `static/app.js`'s "Try generic
+detection" button to `/api/v1/jobs` + polling. No streaming/
+live-progress endpoint exists yet - the REST API and CLI are poll-only
+for job status.
 
 ### Known Technical Debt
 - ~~Fix JobManager submit race condition~~ - fixed: `submit()` was
@@ -130,6 +167,10 @@ REST API and CLI are poll-only for job status.
   fixed for the fast info-lookup path (see "Web UI Reconciliation"
   above). Still true for the interactive/CAPTCHA path - see the next
   few items, all still open.
+- ~~Two unreconciled browser stacks~~ - resolved, see "Browser Stack
+  Decision" above. `ExecutionContext.browser` / `Capability.BROWSER`
+  now point at something real; nothing exercises it yet, though, since
+  Stage 2 hasn't been rebuilt to use it.
 - Make Job updates thread-safe - `Job.status` / `.result` / `.error` /
   `.progress` are still set without a lock in `JobManager`.
 - Add immutable job snapshots - still open. `GET /jobs/{id}` gives a
@@ -141,16 +182,19 @@ REST API and CLI are poll-only for job status.
   Pre-existing from the platform-execution-foundation merge.
 - `video_downloader` (`tools/video_downloader/selenium_detector.py`)
   never resolves its session dict on completion - the "Try generic
-  detection" button hangs indefinitely.
+  detection" button hangs indefinitely. Now unblocked (browser stack
+  decided) - this is the Current Focus.
 - `tools/video_downloader/stream_extractor.py` imports from the
   pre-migration path `video_downloader.extractor` instead of
   `tools.video_downloader.extractor`; the import always fails and
-  silently falls back to a stub.
-- Two unreconciled browser stacks: `app/browser_manager.py`
-  (Playwright) vs. `selenium_detector.py` (SeleniumBase) - neither
-  `ExecutionContext.browser` nor `Capability.BROWSER` touches what the
-  tool actually drives. This blocks Stage 2 and needs deciding first.
-- `libraries/captcha_manager` is fully built but never registered as a
-  platform service; `Capability.CAPTCHA` is currently a no-op
-  permission check.
+  silently falls back to a stub. Also part of Current Focus.
+- `libraries/captcha_manager` is fully built but never actually
+  exercised (its one real call site, `selenium_detector.py`'s pipeline,
+  is broken - see above). Per `docs/implementation/CAPTCHA_MANAGER.md`
+  it's a Shared Library meant to be instantiated directly by
+  tools/Browser Manager, not registered in the `ServiceContainer` like
+  a Platform Service - so "wiring it in" means fixing its call site,
+  not adding container registration.
+- `Dockerfile`'s new Chrome/chromedriver install step is unverified -
+  see "Browser Stack Decision" above.
 

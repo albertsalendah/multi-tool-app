@@ -25,7 +25,9 @@ class ApplicationKernel:
         self.permissions = PermissionManager()
         self.container = ServiceContainer()
         self.registry = ToolRegistry()
-        self.browser = BrowserManager()
+        self.browser = BrowserManager(
+            default_headless=self.config.get("browser.headless", True)
+        )
         self._initialized = False
         self.events = EventBus()
         self.jobs = JobManager(
@@ -40,7 +42,6 @@ class ApplicationKernel:
             return
         log = self.logger.logger
         self.container.register("permissions", self.permissions)
-        self.browser.initialize(headless=self.config.get("browser.headless", True))
         self.registry.discover_tools()
 
         self._initialized = True

@@ -25,16 +25,24 @@
 - [x] Web UI fast-path reconciliation - GET /tools/video-downloader/info
       replaced by POST /api/v1/tools/video_downloader/run, going
       through the Kernel/Plugin SDK lifecycle instead of bypassing it
+- [x] Browser stack decision: SeleniumBase (not Playwright). Browser
+      Manager rewritten to acquire()/release()/shutdown() sessions;
+      Playwright removed from requirements.txt/Dockerfile entirely.
 
 ## Current Milestone
-Reconcile the interactive/CAPTCHA path in static/video_downloader.html
-with the REST API - blocked on resolving the Playwright vs SeleniumBase
-question first (see ARCHITECTURE_CHANGELOG.md's technical debt list).
-The fast info-lookup path is done (see Completed).
+Finish Stage 2 of the web UI reconciliation (interactive/CAPTCHA path)
+now that the browser stack is decided:
+- Fix `selenium_detector.py`'s session pipeline (never resolves today)
+- Fix `stream_extractor.py`'s stale pre-migration import
+- Rebuild the interactive detection flow as a real `BaseTool` going
+  through `kernel.run_tool()` / the Job Manager, replacing its own
+  ad-hoc `SESSIONS` dict
+- Rewire `static/app.js`'s "Try generic detection" button to
+  `/api/v1/jobs` + polling, replacing the bespoke
+  `detect-interactive`/`session/{id}/status` routes
 
 ## Next Milestones
-- Interactive/CAPTCHA path reconciliation (Stage 2) - requires fixing
-  selenium_detector.py's session pipeline, stream_extractor.py's stale
-  import, and picking one browser stack
+- Interactive/CAPTCHA path reconciliation (Stage 2, in progress - see
+  Current Milestone)
 - Real Tools (beyond video_downloader)
 - Desktop UI / Mobile app - deferred until the web app is solid

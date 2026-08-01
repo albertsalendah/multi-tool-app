@@ -3,18 +3,10 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
 
-# --- ENGINE SELECTION ---
-# Switch between SeleniumBase and Patchright by changing this import:
 from tools.video_downloader.selenium_detector import (
     get_session_status,
     start_session,
 )
-
-# To switch back to Patchright Playwright, use:
-# from video_downloader.interactive_detector import (
-#     start_session,
-#     get_session_status,
-# )
 
 # tools/video_downloader/router.py -> tools/video_downloader -> tools -> repo
 # root, then /static. (Previously missing one .parent - pointed at the
