@@ -28,21 +28,24 @@
 - [x] Browser stack decision: SeleniumBase (not Playwright). Browser
       Manager rewritten to acquire()/release()/shutdown() sessions;
       Playwright removed from requirements.txt/Dockerfile entirely.
+- [x] Web UI Stage 2 - interactive/CAPTCHA path reconciled. New
+      `video_downloader_interactive` tool (separate from
+      `video_downloader` since it needs the `browser` capability and
+      the fast tool doesn't) replaces the broken `selenium_detector.py`
+      pipeline (which never returned a result) and goes through
+      `kernel.run_tool()`/the Job Manager instead of its own ad-hoc
+      `SESSIONS` dict. `stream_extractor.py`'s stale pre-migration
+      import fixed. `static/app.js`'s "Try generic detection" now uses
+      `POST /api/v1/jobs` + polling.
 
 ## Current Milestone
-Finish Stage 2 of the web UI reconciliation (interactive/CAPTCHA path)
-now that the browser stack is decided:
-- Fix `selenium_detector.py`'s session pipeline (never resolves today)
-- Fix `stream_extractor.py`'s stale pre-migration import
-- Rebuild the interactive detection flow as a real `BaseTool` going
-  through `kernel.run_tool()` / the Job Manager, replacing its own
-  ad-hoc `SESSIONS` dict
-- Rewire `static/app.js`'s "Try generic detection" button to
-  `/api/v1/jobs` + polling, replacing the bespoke
-  `detect-interactive`/`session/{id}/status` routes
+Undecided - open question raised while finishing Stage 2: should tool
+executions get a wrapping timeout (like `WorkflowStep` already has),
+so a stuck browser launch or other slow operation can't tie up a
+`JobManager` worker thread indefinitely? Not implemented yet - flagged
+for discussion, not decided unilaterally.
 
 ## Next Milestones
-- Interactive/CAPTCHA path reconciliation (Stage 2, in progress - see
-  Current Milestone)
 - Real Tools (beyond video_downloader)
+- Browser Pool (reuse acquired sessions instead of one per acquire())
 - Desktop UI / Mobile app - deferred until the web app is solid

@@ -45,6 +45,14 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
   initialize up front, unlike Playwright). Removed from
   `requirements.txt`; `Dockerfile`'s browser install step now installs
   real Google Chrome + a matching chromedriver instead.
+- Web UI (interactive/CAPTCHA path): new `video_downloader_interactive`
+  tool replaces `selenium_detector.py`'s broken pipeline (opened a
+  browser, checked for CAPTCHA, then never returned a result - hung
+  forever) with one that actually completes and goes through
+  `kernel.run_tool()`/the Job Manager. `stream_extractor.py`'s stale
+  pre-migration import fixed. `static/app.js`'s "Try generic
+  detection" now uses `POST /api/v1/jobs` + polling, same as any other
+  job, instead of a bespoke session-tracking endpoint.
 - Test suite covering all of the above (`tests/`).
 
 ### Known limitations

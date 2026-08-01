@@ -72,19 +72,27 @@ if (detectBtn) {
 }
 
 async function startInteractiveSession(url) {
-  const res = await fetch(`/tools/video-downloader/detect-interactive?url=${encodeURIComponent(url)}`, { method: "POST" });
-  const session = await res.json();
+  const res = await fetch("/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool: "video_downloader_interactive", params: { url } }),
+  });
+  const job = await res.json();
 
   if (!res.ok) {
-    throw new Error(session.detail || "Failed to launch detector.");
+    throw new Error(job.detail || "Failed to launch detector.");
   }
 
-  activeSessionId = session.session_id;
+  activeSessionId = job.job_id;
 
   streamPollInterval = setInterval(async () => {
     try {
-      const statusRes = await fetch(`/tools/video-downloader/session/${activeSessionId}/status`);
+      const statusRes = await fetch(`/api/v1/jobs/${activeSessionId}`);
       const data = await statusRes.json();
+
+      if (!statusRes.ok) {
+        throw new Error(data.detail || "Failed to check job status.");
+      }
 
       if (data.status === "completed") {
         clearInterval(streamPollInterval);
@@ -92,6 +100,9 @@ async function startInteractiveSession(url) {
       } else if (data.status === "failed") {
         clearInterval(streamPollInterval);
         throw new Error(data.error || "Detection failed.");
+      } else if (data.status === "cancelled") {
+        clearInterval(streamPollInterval);
+        throw new Error("Detection was cancelled.");
       }
     } catch (err) {
       clearInterval(streamPollInterval);

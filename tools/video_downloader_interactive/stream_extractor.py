@@ -3,24 +3,7 @@ import re
 import time
 from typing import Dict, Optional, Tuple
 
-try:
-    from video_downloader.extractor import fetch_video_info
-except ImportError:
-    def fetch_video_info(url, headers=None, cookies=None):
-        return {
-            "title": "Stream Captured",
-            "duration_string": "Live / Stream",
-            "extractor": "Generic Stream",
-            "formats": [
-                {
-                    "resolution": "Auto / Stream",
-                    "ext": "m3u8",
-                    "has_audio": True,
-                    "filesize_display": "Unknown",
-                }
-            ],
-            "audio_formats": [],
-        }
+from tools.video_downloader.extractor import fetch_video_info
 
 STREAM_PATTERNS = [
     r"\.m3u8(\?|$)",
@@ -36,6 +19,10 @@ def extract_stream_from_logs(driver, target_url: str, max_wait: Optional[int] = 
     """
     Purely responsible for sniffing network performance logs
     and extracting video stream links (.m3u8, .mp4) + metadata.
+
+    Requires the driver's session to have been started with performance
+    logging enabled (SeleniumBase: log_cdp=True / log_cdp_events=True) -
+    otherwise get_log("performance") returns nothing to search.
     """
     captured_stream = None
     referer = target_url
@@ -83,6 +70,10 @@ def extract_stream_from_logs(driver, target_url: str, max_wait: Optional[int] = 
             cookies=cookie_dict,
         )
     except Exception:
+        # We found a real stream URL but yt-dlp couldn't pull full
+        # metadata for it (e.g. an unusual manifest format) - return a
+        # minimal synthetic result with what we actually know, rather
+        # than failing the whole detection.
         result = {
             "title": getattr(driver, "title", "Captured Stream"),
             "duration_string": "Stream Captured",

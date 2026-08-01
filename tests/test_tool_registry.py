@@ -47,3 +47,18 @@ def test_real_video_downloader_manifest_still_loads():
     assert "video_downloader" in registry.list_tools()
     manifest = registry.get_manifest("video_downloader")
     assert manifest.entry == "tool:VideoDownloaderTool"
+    assert manifest.capabilities == ["network"]
+
+
+def test_real_video_downloader_interactive_manifest_loads():
+    """Regression check for the new interactive/CAPTCHA tool - real
+    discovery, not mocked, confirming the second manifest.json in
+    tools/ doesn't collide with or break discovery of the first."""
+    registry = ToolRegistry()
+    registry.discover_tools()
+
+    assert "video_downloader_interactive" in registry.list_tools()
+    manifest = registry.get_manifest("video_downloader_interactive")
+    assert manifest.entry == "tool:VideoDownloaderInteractiveTool"
+    assert manifest.capabilities == ["browser", "network"]
+    assert len(registry.list_tools()) == 2

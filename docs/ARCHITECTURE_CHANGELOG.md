@@ -146,15 +146,70 @@
   (and referencing a `video_downloader.interactive_detector` module
   that doesn't exist in the current directory structure anyway).
 
+### Web UI Reconciliation, Stage 2: Interactive/CAPTCHA Path
+- New `tools/video_downloader_interactive/` package - a separate tool
+  from `video_downloader`, not an action param on it, since the
+  registry's plugin discovery is one-manifest-per-top-level-directory
+  (`ToolRegistry.discover_tools()` looks for exactly one
+  `manifest.json` per `tools/<name>/` package) and the two genuinely
+  need different capabilities (`["network"]` vs `["browser", "network"]`).
+- `pipeline.py` replaces `selenium_detector.py`'s
+  `run_detection_pipeline`, which opened the browser, checked/waited
+  for a CAPTCHA, then did nothing else - never extracted a stream,
+  never returned anything, hung forever from the caller's perspective.
+  The new version actually completes: `activate_cdp_mode()` -> `goto()`
+  -> `CaptchaManager(sb).check()` -> raise if still blocked, else
+  extract the stream and return a result. Two `raise_if_cancelled()`
+  checkpoints (before the CAPTCHA check, before stream extraction) -
+  DELETE /api/v1/jobs/{id} can interrupt between those, though not
+  mid-CAPTCHA-wait, since that sleep happens inside
+  `captcha_manager.py`'s own code, opaque to cancellation checks.
+- `tool.py`: `initialize()` acquires a *visible* session
+  (`headless=False` - a human needs to see the window for manual
+  CAPTCHA solving) with `log_cdp=True` (required for
+  `stream_extractor`'s network-log sniffing - confirmed against the
+  real installed seleniumbase that this wasn't being set anywhere
+  before, which is a second reason the old pipeline's stream
+  extraction never had a chance of working even if it had been
+  reached). Session is stored via `context.set_state("sb", ...)`, not
+  on `self` - the registry keeps one shared tool instance across every
+  execution, so per-run state on `self` would race if two interactive
+  jobs ran concurrently (`JobManager`'s pool defaults to 4 workers).
+- `stream_extractor.py` moved into the new package (only the
+  interactive tool uses it now) with the stale
+  `video_downloader.extractor` import fixed to
+  `tools.video_downloader.extractor`. Also removed the silent
+  import-time stub fallback that masked ImportError with fake data for
+  the whole function - exactly the kind of thing that let this bug go
+  unnoticed. The *runtime* fallback (yt-dlp fails to parse a stream URL
+  we already found) was kept - that one's reasonable, not a bug.
+- `tools/video_downloader/selenium_detector.py` deleted entirely -
+  fully replaced, nothing imports it anymore.
+- `router.py`'s bespoke `detect-interactive`/`session/{id}/status`
+  routes removed (same pattern as removing `/info` in Stage 1) -
+  `static/app.js`'s "Try generic detection" now calls
+  `POST /api/v1/jobs` + polls `GET /api/v1/jobs/{id}`, same as any
+  other job.
+- Verified with real end-to-end HTTP calls against `main.py`'s actual
+  app (no stubbing needed this time - the thing that used to require
+  stubbing, `selenium_detector.py`, is gone): job creation reaches the
+  real Kernel/Registry/Permission/JobManager path, `POST /tools/{name}/run`
+  correctly refuses this tool (400, `browser` capability), and `GET
+  /api/v1/tools` lists both tools with accurate capabilities.
+  **Not verified**: a real browser actually launching. This sandbox has
+  no Chrome binary; a real `acquire()` call reaches genuine
+  seleniumbase driver-download code but behavior there was
+  inconsistent (a fast 403 in one run, a 30+ second hang in another) -
+  looks like this sandbox's network restrictions, not a code defect,
+  but flagging plainly rather than implying it's proven.
+
 ### Current Focus
-Now that the browser stack is decided, finish Stage 2 of the web UI
-reconciliation: fix `selenium_detector.py`'s session pipeline and
-`stream_extractor.py`'s stale import, rebuild interactive detection as
-a real `BaseTool` through `kernel.run_tool()`/the Job Manager instead
-of its own `SESSIONS` dict, and rewire `static/app.js`'s "Try generic
-detection" button to `/api/v1/jobs` + polling. No streaming/
-live-progress endpoint exists yet - the REST API and CLI are poll-only
-for job status.
+Open question raised while finishing Stage 2, not yet decided: should
+tool executions get a wrapping timeout (`WorkflowStep` already has
+one), so a stuck browser launch or other slow operation can't tie up a
+`JobManager` worker thread indefinitely? No streaming/live-progress
+endpoint exists yet either - the REST API and CLI are poll-only for
+job status.
 
 ### Known Technical Debt
 - ~~Fix JobManager submit race condition~~ - fixed: `submit()` was
@@ -164,13 +219,15 @@ for job status.
   Token" above (this item was stale - the token already existed by the
   time it was still listed here).
 - ~~`tools/video_downloader/router.py` bypasses `kernel.run_tool()`~~ -
-  fixed for the fast info-lookup path (see "Web UI Reconciliation"
-  above). Still true for the interactive/CAPTCHA path - see the next
-  few items, all still open.
+  fixed, both paths now (fast in Stage 1, interactive in Stage 2).
 - ~~Two unreconciled browser stacks~~ - resolved, see "Browser Stack
-  Decision" above. `ExecutionContext.browser` / `Capability.BROWSER`
-  now point at something real; nothing exercises it yet, though, since
-  Stage 2 hasn't been rebuilt to use it.
+  Decision" above.
+- ~~`video_downloader`/`selenium_detector.py` never resolves its
+  session dict~~ - fixed, see "Web UI Reconciliation, Stage 2" above.
+- ~~`stream_extractor.py`'s stale pre-migration import~~ - fixed, same
+  section.
+- ~~`libraries/captcha_manager` never actually exercised~~ - now
+  exercised by `tools/video_downloader_interactive/pipeline.py`.
 - Make Job updates thread-safe - `Job.status` / `.result` / `.error` /
   `.progress` are still set without a lock in `JobManager`.
 - Add immutable job snapshots - still open. `GET /jobs/{id}` gives a
@@ -180,21 +237,15 @@ for job status.
   fails - its `ContextTool` still expects `kwargs["services"]`, but
   `kernel.run_tool()` now only injects `context`, not `services`.
   Pre-existing from the platform-execution-foundation merge.
-- `video_downloader` (`tools/video_downloader/selenium_detector.py`)
-  never resolves its session dict on completion - the "Try generic
-  detection" button hangs indefinitely. Now unblocked (browser stack
-  decided) - this is the Current Focus.
-- `tools/video_downloader/stream_extractor.py` imports from the
-  pre-migration path `video_downloader.extractor` instead of
-  `tools.video_downloader.extractor`; the import always fails and
-  silently falls back to a stub. Also part of Current Focus.
-- `libraries/captcha_manager` is fully built but never actually
-  exercised (its one real call site, `selenium_detector.py`'s pipeline,
-  is broken - see above). Per `docs/implementation/CAPTCHA_MANAGER.md`
-  it's a Shared Library meant to be instantiated directly by
-  tools/Browser Manager, not registered in the `ServiceContainer` like
-  a Platform Service - so "wiring it in" means fixing its call site,
-  not adding container registration.
-- `Dockerfile`'s new Chrome/chromedriver install step is unverified -
+- `Dockerfile`'s Chrome/chromedriver install step is still unverified -
   see "Browser Stack Decision" above.
+- Whether tool executions need a wrapping timeout - see Current Focus.
+  Not implemented; needs a decision, not a unilateral default.
+- `captcha_manager.py`'s manual-CAPTCHA wait is a single 120-second
+  sleep then one recheck, not a poll loop - if a human solves it in 5
+  seconds, `check()` still blocks for the full 120s before noticing.
+  Deliberately not touched while fixing the video_downloader pipeline
+  (out of scope - `captcha_manager` is a separate shared library with
+  its own established behavior); noting it here since nobody had
+  written it down before.
 

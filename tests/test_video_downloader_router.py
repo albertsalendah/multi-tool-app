@@ -1,36 +1,7 @@
-import sys
-import types
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-
-def _stub_selenium_detector():
-    """selenium_detector.py imports seleniumbase, which isn't installed
-    in every environment that should be able to run this test suite
-    (it's a server-side dependency, not needed just to test routing).
-    Stub it out before router.py imports it, so this file doesn't
-    require installing seleniumbase just to check route wiring."""
-
-    if "tools.video_downloader.selenium_detector" in sys.modules:
-        return
-
-    stub = types.ModuleType("tools.video_downloader.selenium_detector")
-
-    async def start_session(url):
-        return {"session_id": "stub-session"}
-
-    def get_session_status(session_id):
-        return {"status": "active", "result": None, "error": None}
-
-    stub.start_session = start_session
-    stub.get_session_status = get_session_status
-    sys.modules["tools.video_downloader.selenium_detector"] = stub
-
-
-_stub_selenium_detector()
-
-from fastapi import FastAPI  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
-from tools.video_downloader.router import router  # noqa: E402
+from tools.video_downloader.router import router
 
 
 def _client() -> TestClient:
@@ -64,19 +35,19 @@ def test_info_endpoint_no_longer_exists():
     assert response.status_code == 404
 
 
-def test_interactive_session_routes_are_still_registered():
-    """Not testing the real (still Stage-2, still broken) detection
-    pipeline here - just confirming router.py's route wiring for it
-    wasn't disturbed by removing /info and fixing STATIC_DIR."""
+def test_interactive_session_routes_no_longer_exist():
+    """The interactive/CAPTCHA path now goes through POST /api/v1/jobs +
+    GET /api/v1/jobs/{id} (see app/api.py, tools/video_downloader_interactive/,
+    static/app.js) instead of this router's old bespoke session endpoints.
+    selenium_detector.py (which these used to be mapped to) was deleted -
+    its working replacement lives in tools/video_downloader_interactive/."""
     client = _client()
 
     response = client.post(
         "/tools/video-downloader/detect-interactive",
         params={"url": "https://example.com"},
     )
-    assert response.status_code == 200
-    assert response.json() == {"session_id": "stub-session"}
+    assert response.status_code == 404
 
-    response = client.get("/tools/video-downloader/session/stub-session/status")
-    assert response.status_code == 200
-    assert response.json()["status"] == "active"
+    response = client.get("/tools/video-downloader/session/some-id/status")
+    assert response.status_code == 404

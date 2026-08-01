@@ -1,0 +1,14 @@
+{
+    "id": "video_downloader_interactive",
+    "name": "Video Downloader (Interactive)",
+    "version": "1.0.0",
+    "description": "Open a visible browser to get past CAPTCHA/bot-detection challenges, then detect the underlying video stream.",
+    "author": "Richard Salendah",
+    "entry": "tool:VideoDownloaderInteractiveTool",
+    "enabled": true,
+
+    "capabilities": [
+        "browser",
+        "network"
+    ]
+}
