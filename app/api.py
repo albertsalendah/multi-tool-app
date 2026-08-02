@@ -10,6 +10,26 @@ from app.kernel import ApplicationKernel
 
 router = APIRouter(prefix="/api/v1", tags=["platform-api"])
 
+# kernel.run_tool(name, background=..., **params) binds these two
+# positionally/by-keyword itself - if a client's params dict also
+# contains either key, Python raises "got multiple values for
+# argument" (a TypeError, uncaught anywhere else in this router),
+# surfacing as an ugly unhandled 500 instead of a clear client error.
+_RESERVED_PARAM_NAMES = {"name", "background"}
+
+
+def _reject_reserved_params(params: dict) -> None:
+    collisions = _RESERVED_PARAM_NAMES & params.keys()
+
+    if collisions:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "params cannot use reserved name(s): "
+                f"{', '.join(sorted(collisions))}"
+            ),
+        )
+
 
 # --------------------------------------------------------------------------
 # Kernel access
@@ -97,6 +117,8 @@ def create_job(
     body: CreateJobRequest,
     kernel: ApplicationKernel = Depends(get_kernel),
 ):
+    _reject_reserved_params(body.params)
+
     try:
         job_id = kernel.run_tool(body.tool, background=True, **body.params)
     except KeyError:
@@ -164,6 +186,8 @@ def run_tool_sync(
                 "POST /jobs instead of this synchronous endpoint."
             ),
         )
+
+    _reject_reserved_params(body.params)
 
     try:
         result = kernel.run_tool(name, background=False, **body.params)

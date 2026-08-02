@@ -53,6 +53,21 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
   pre-migration import fixed. `static/app.js`'s "Try generic
   detection" now uses `POST /api/v1/jobs` + polling, same as any other
   job, instead of a bespoke session-tracking endpoint.
+- Full platform audit (everything outside video_downloader/CAPTCHA
+  specifics) - see `docs/ARCHITECTURE_CHANGELOG.md`'s Known Technical
+  Debt for the complete list of findings, most still open.
+- `BrowserManager`: `acquire(timeout=...)` now supports a watchdog
+  that force-kills (SIGKILL, via the session's real OS process ID) a
+  browser session that isn't released in time - a concrete answer to
+  "Python threads can't be killed from outside" for the
+  browser-hang case specifically. Not yet wired into any tool.
+- Six minor fixes: `.gitignore` covers `logs/*.log`; `Config` warns
+  and falls back to defaults instead of silently continuing or
+  crashing on a bad config file; `CONFIGURATION_SCHEMA.md`/
+  `ERROR_CODES.md` doc drift corrected; unused import removed; `POST
+  /api/v1/jobs`/`POST /api/v1/tools/{name}/run` reject a `params` dict
+  that collides with reserved argument names instead of crashing with
+  an unhandled 500.
 - Test suite covering all of the above (`tests/`).
 
 ### Known limitations

@@ -37,15 +37,47 @@
       `SESSIONS` dict. `stream_extractor.py`'s stale pre-migration
       import fixed. `static/app.js`'s "Try generic detection" now uses
       `POST /api/v1/jobs` + polling.
+- [x] Full platform audit (everything outside video_downloader/CAPTCHA
+      specifics, which are intentionally deferred) - see
+      `docs/ARCHITECTURE_CHANGELOG.md`'s Known Technical Debt for the
+      complete findings list, most still open. Six items already fixed
+      this round (see below).
+- [x] `BrowserManager` PID-tracking + watchdog: `acquire(timeout=...)`
+      starts a watchdog that force-kills (SIGKILL, via the real PID -
+      `driver.browser_pid` for `uc=True` sessions, else
+      `driver.service.process.pid`) a session's OS-level browser
+      process if it isn't `release()`'d in time. Answers the "stuck
+      browser hang" case concretely - verified against real
+      self-controlled subprocesses, not mocked. Deliberately scoped to
+      `BrowserManager` only; NOT yet wired into any tool's
+      `initialize()` call (that's part of the video_downloader-specific
+      follow-up, still deferred) and does NOT answer the broader "should
+      tool executions get a wrapping timeout" design question (still open).
+- [x] Six minor fixes from the platform audit: `.gitignore` now covers
+      `logs/*.log`; `Config` warns and falls back to defaults instead of
+      silently continuing (missing file) or crashing (malformed YAML);
+      `CONFIGURATION_SCHEMA.md`/`ERROR_CODES.md` doc drift corrected
+      (marked aspirational sections/codes as not-yet-implemented rather
+      than implying they're live); unused `import inspect` removed from
+      `app/tool_registry.py`; `POST /api/v1/jobs` and
+      `POST /api/v1/tools/{name}/run` now reject a `params` dict that
+      collides with `run_tool()`'s own `name`/`background` arguments
+      (was an unhandled 500, now a clean 400).
 
 ## Current Milestone
-Undecided - open question raised while finishing Stage 2: should tool
-executions get a wrapping timeout (like `WorkflowStep` already has),
-so a stuck browser launch or other slow operation can't tie up a
-`JobManager` worker thread indefinitely? Not implemented yet - flagged
-for discussion, not decided unilaterally.
+None actively in progress. Sitting on several undecided items - see
+Known Technical Debt in `docs/ARCHITECTURE_CHANGELOG.md` for the full
+list. The two most consequential, in the person's own stated priority:
+1. General tool-execution timeout design (separate from the
+   BrowserManager watchdog above, which only covers browser hangs)
+2. No authentication on the REST API at all - low risk while
+   local-only, real risk the moment this is exposed beyond one machine
 
 ## Next Milestones
+- video_downloader/CAPTCHA-specific improvements (explicitly deferred
+  by the person until "everything else" is handled first - e.g. the
+  120s-flat CAPTCHA manual-wait, wiring the new BrowserManager timeout
+  into the interactive tool)
 - Real Tools (beyond video_downloader)
 - Browser Pool (reuse acquired sessions instead of one per acquire())
 - Desktop UI / Mobile app - deferred until the web app is solid

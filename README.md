@@ -43,13 +43,13 @@ This repository contains architecture documentation under `docs/` (to be added d
 Completed: Architecture Freeze, Platform Refactor, Core Services
 (Kernel, Registry, Job Manager, Browser Manager, Event Bus, Execution
 Context, Scheduler), Workflow Engine, Plugin SDK, REST API, CLI, the
-browser stack decision (SeleniumBase), and the full web UI
-reconciliation with the REST API (both the fast info-lookup path and
-the interactive/CAPTCHA path).
-Current focus: an open design question (should tool executions get a
-wrapping timeout?), then Real Tools beyond video_downloader. See
-`docs/STATUS.md` for the full checklist and
-`docs/ARCHITECTURE_CHANGELOG.md` for details.
+browser stack decision (SeleniumBase), the full web UI reconciliation,
+a full platform audit, and BrowserManager PID-tracking + a watchdog
+for stuck browser sessions.
+Currently undecided: a general tool-execution timeout, and REST API
+authentication. See `docs/STATUS.md` for the full checklist,
+`docs/ARCHITECTURE_CHANGELOG.md` for details, and
+`docs/HANDOVER_2026-08-02.md` for a full session handover.
 
 ## License
 TBD

@@ -8,3 +8,4 @@ venv/
 .vscode
 patchright_session
 test.py
+logs/*.log

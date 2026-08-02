@@ -203,49 +203,198 @@
   looks like this sandbox's network restrictions, not a code defect,
   but flagging plainly rather than implying it's proven.
 
+### Full Platform Audit
+Requested explicitly: review everything outside video_downloader/
+CAPTCHA specifics (those are deliberately deferred - see "Next
+Milestones" in `docs/STATUS.md`) for anything missed or improvable.
+Read every `app/` module, `cli/`, `main.py`, `tools/base_tool.py`
+fresh, and cross-checked docs against real code rather than relying on
+memory. Findings, by severity - fixed ones marked, everything else
+still open:
+
+**Real bugs (confirmed by reproduction, not theoretical):**
+- ~~`Config.get()` doesn't type-coerce environment variable
+  overrides~~ - NOT fixed this round (out of the "minor" batch that
+  was fixed - see below). Confirmed concretely: `JOBS_MAX_WORKERS=8`
+  crashes kernel construction (`TypeError`, comparing `str` to `int`
+  inside `ThreadPoolExecutor`); `BROWSER_HEADLESS=false` silently does
+  the *opposite* of what's intended (non-empty string is truthy, so
+  headless stays `True`). Still open.
+- `tool.finished` event never fires for background jobs - only the
+  synchronous path in `kernel.run_tool()` emits it. Since background
+  execution is the primary path now, anything built on `tool.finished`
+  for logging/monitoring would silently miss most executions. Still open.
+- `context.report_progress()` is completely disconnected from
+  `job.progress` - a tool can call it, but `GET /api/v1/jobs/{id}`'s
+  `progress` field reads from a separate `Job.progress` attribute
+  nothing ever updates mid-run. Shows `0` the whole time, then jumps to
+  `100` on completion regardless of what a tool reports. Still open.
+- `POST /tools/{name}/run`'s error handling can misclassify a tool's
+  own internal `KeyError` bug as `"Unknown tool"` (404) - the
+  `except KeyError` wraps the whole `kernel.run_tool()` call, including
+  the tool's own `run()`. Still open (not part of the fixed batch -
+  fixing it means narrowing that except clause, deliberately left for
+  next time since it wasn't in the requested 15-20 list).
+- ~~`main.py`'s comment above `include_router(video_downloader_router)`
+  claims it "still bypasses the kernel directly"~~ - **still stale,
+  not fixed this round** (also wasn't in the requested batch). True
+  when written (Stage 1 commit), false since Stage 2. Quick fix
+  whenever someone's next in that file.
+
+**Security (not addressed this round - explicitly bigger than "minor"):**
+- No authentication anywhere on the REST API - anyone who can reach it
+  can run any tool, including the one that launches a real browser.
+- CORS is wide open (`allow_origins=["*"]` + `allow_credentials=True`
+  in `main.py`) - any website's JS can hit the local API with
+  credentials if the browser can reach it. Meaningful combined with
+  the point above, not just theoretical.
+
+**Design/scale gaps (not bugs, real capacity/capability gaps):**
+- `JobManager._jobs` / `Scheduler._schedules` grow forever - no
+  cleanup, eviction, or archival. Unbounded memory growth on a
+  long-running server. (`JOB_LIFECYCLE.md` documents a "Job Archived"
+  state that was never built.)
+- `JobManager.shutdown()` calls `executor.shutdown(wait=True)` - blocks
+  indefinitely if any job is stuck. Not just "the job never finishes" -
+  the whole app can't shut down gracefully either. The new
+  `BrowserManager` watchdog (below) helps for browser-specific hangs
+  but doesn't touch this generally.
+- `Scheduler` is fully built, tested, wired into the kernel - and has
+  zero REST/CLI surface. Currently unreachable from outside the process.
+- `GET /api/v1/tools` doesn't expose a tool's `capabilities` - no way
+  for a caller to know a tool needs `browser` (and might run long)
+  without trying it and getting refused, or reading source.
+- `ToolRegistry` reuses one shared tool instance across every
+  execution, forever. Handled correctly for the interactive tool via
+  `context.set_state()`, but it's a footgun for any future tool author
+  who stores state on `self` instead.
+- `EventBus.emit()` doesn't isolate listener failures (one bad
+  subscriber breaks the rest, and whatever called `emit()`), and
+  neither it nor `ServiceContainer` has any locking. Low practical risk
+  today (all current listeners are simple `log.info()` calls), worth
+  knowing as the app grows.
+- `PermissionManager` only really enforces the `browser` capability -
+  `network`/`filesystem`/`captcha`/`clipboard`/`database` are
+  declared-but-unchecked (map to `None` in `_services`). Worth
+  confirming this is intentional rather than assumed-done.
+
+**Minor - six of these were fixed this round, see below for which.**
+
+### BrowserManager: PID Tracking + Watchdog
+Concrete fix for the "stuck browser hang" case discussed at length
+(threads can't be killed from outside; a timeout on the caller's side
+doesn't free the underlying thread/process - see the earlier
+conversation about this before assuming a naive timeout would be enough).
+
+- `acquire(timeout=..., **overrides)`: if `timeout` is given, a
+  `threading.Timer` starts immediately. If the session isn't
+  `release()`'d within that many seconds, its real OS-level browser
+  process is force-killed (`SIGKILL`) and the session is torn down
+  automatically. `timeout=None` (default) - identical behavior to
+  before, nothing changes for existing callers.
+- PID resolution (`_resolve_pid()`) confirmed against the real
+  installed `seleniumbase`/`selenium` packages, not guessed:
+  `driver.browser_pid` for `uc=True` sessions (SeleniumBase's own
+  internal cleanup uses this exact attribute the same way -
+  `os.kill(self.browser_pid, 15)` in `seleniumbase/undetected/__init__.py`
+  - so this is a real, supported mechanism), falling back to
+  `driver.service.process.pid` (standard Selenium `Service` API) for
+  non-`uc` sessions.
+  `release()` cancels any outstanding watchdog. `shutdown()` cancels
+  all outstanding watchdogs before its normal cleanup sweep.
+- Tests use real, self-controlled subprocesses (`sleep 100`, killed via
+  the actual manager) rather than mocking `os.kill` - proves the kill
+  mechanism genuinely works end-to-end, not just that a function got
+  called.
+- Deliberately scoped to `BrowserManager` only. NOT wired into
+  `video_downloader_interactive`'s `initialize()` yet - that's a
+  video_downloader-specific change, still deferred per the person's
+  explicit request. Does NOT answer the general "should tool
+  executions get a wrapping timeout" question either - that's a
+  broader design decision this doesn't resolve, just makes the
+  browser-specific case concretely fixable once someone opts a tool
+  into it.
+
 ### Current Focus
-Open question raised while finishing Stage 2, not yet decided: should
-tool executions get a wrapping timeout (`WorkflowStep` already has
-one), so a stuck browser launch or other slow operation can't tie up a
-`JobManager` worker thread indefinitely? No streaming/live-progress
-endpoint exists yet either - the REST API and CLI are poll-only for
-job status.
+Nothing actively in progress. Two undecided items carried forward,
+most consequential first:
+1. General tool-execution timeout - separate from the BrowserManager
+   watchdog above, which only helps once a tool actually calls
+   `acquire(timeout=...)`. Nothing calls it with a timeout yet.
+2. No authentication on the REST API - low risk while local-only, real
+   risk the moment this is exposed beyond one machine.
+
+Also still true: no streaming/live-progress endpoint - the REST API
+and CLI are poll-only for job status.
 
 ### Known Technical Debt
-- ~~Fix JobManager submit race condition~~ - fixed: `submit()` was
-  calling `executor.submit()` twice, running every background job
-  twice over.
-- ~~Add cooperative cancellation token~~ - done, see "Cancellation
-  Token" above (this item was stale - the token already existed by the
-  time it was still listed here).
+Fixed this round (six "minor" items, explicitly requested as a batch):
+- ~~`logs/app.log` not in `.gitignore`~~ - added `logs/*.log`. Was
+  manually `rm`'d before every commit all session; one missed removal
+  away from landing in git history.
+- ~~`Config` does zero validation~~ - a missing config file now logs a
+  warning and falls back to defaults instead of silently continuing; a
+  malformed one logs a warning and falls back instead of crashing with
+  a raw YAML traceback. (Note: this is about the file itself being
+  readable/parseable - it does NOT fix the separate, still-open
+  env-var type-coercion bug above.)
+- ~~`CONFIGURATION_SCHEMA.md` documents sections that don't exist~~ -
+  corrected to list real sections (`app`/`browser`/`jobs`/`logging`)
+  separately from planned ones.
+- ~~`ERROR_CODES.md`'s codes never used anywhere~~ - marked explicitly
+  as planned/not-yet-implemented rather than implying they're live.
+- ~~Unused `import inspect` in `app/tool_registry.py`~~ - removed.
+- ~~`POST /api/v1/jobs` / `POST /tools/{name}/run` don't guard against
+  `params` colliding with `run_tool()`'s own `name`/`background`
+  arguments~~ - both now reject with a clean 400 instead of an
+  unhandled 500.
+
+Still open (carried forward from before, plus everything found in this
+audit that wasn't in the fixed batch - see "Full Platform Audit" above
+for the complete list with detail):
+- ~~Fix JobManager submit race condition~~ - fixed (earlier round):
+  `submit()` was calling `executor.submit()` twice.
+- ~~Add cooperative cancellation token~~ - done (earlier round).
 - ~~`tools/video_downloader/router.py` bypasses `kernel.run_tool()`~~ -
-  fixed, both paths now (fast in Stage 1, interactive in Stage 2).
-- ~~Two unreconciled browser stacks~~ - resolved, see "Browser Stack
-  Decision" above.
+  fixed (earlier round), both paths.
+- ~~Two unreconciled browser stacks~~ - resolved (earlier round).
 - ~~`video_downloader`/`selenium_detector.py` never resolves its
-  session dict~~ - fixed, see "Web UI Reconciliation, Stage 2" above.
-- ~~`stream_extractor.py`'s stale pre-migration import~~ - fixed, same
-  section.
+  session dict~~ - fixed (earlier round).
+- ~~`stream_extractor.py`'s stale pre-migration import~~ - fixed
+  (earlier round).
 - ~~`libraries/captcha_manager` never actually exercised~~ - now
   exercised by `tools/video_downloader_interactive/pipeline.py`.
+- `Config.get()` env-var overrides aren't type-coerced (crashes for
+  ints, silently wrong for bools) - see "Full Platform Audit."
+- `tool.finished` never fires for background jobs - see "Full Platform Audit."
+- `context.report_progress()` disconnected from `job.progress` - see
+  "Full Platform Audit."
+- `POST /tools/{name}/run`'s `KeyError` handling can misclassify a
+  tool's own internal bug as "Unknown tool" - see "Full Platform Audit."
+- `main.py`'s stale comment about video_downloader_router still
+  bypassing the kernel - see "Full Platform Audit."
+- No authentication on the REST API; CORS wide open - see "Full
+  Platform Audit" / Current Focus.
+- `JobManager`/`Scheduler` never clean up old entries; no
+  general tool-execution timeout; `Scheduler` has no REST/CLI surface;
+  `GET /api/v1/tools` doesn't expose capabilities; shared tool
+  instances are a footgun for future tool authors; `EventBus`/
+  `ServiceContainer` have no locking or listener isolation;
+  `PermissionManager` only enforces `browser` - see "Full Platform
+  Audit" for detail on all of these.
 - Make Job updates thread-safe - `Job.status` / `.result` / `.error` /
   `.progress` are still set without a lock in `JobManager`.
-- Add immutable job snapshots - still open. `GET /jobs/{id}` gives a
-  read-only view at the API layer, but there's no internal immutable
-  snapshot type.
+- Add immutable job snapshots - `GET /jobs/{id}` gives a read-only view
+  at the API layer, but there's no internal immutable snapshot type.
 - `tests/test_execution_context.py::test_kernel_passes_context_for_foreground_and_background_execution`
   fails - its `ContextTool` still expects `kwargs["services"]`, but
-  `kernel.run_tool()` now only injects `context`, not `services`.
-  Pre-existing from the platform-execution-foundation merge.
+  `kernel.run_tool()` now only injects `context`. Pre-existing from the
+  platform-execution-foundation merge, never fixed since nothing else
+  touches that path.
 - `Dockerfile`'s Chrome/chromedriver install step is still unverified -
-  see "Browser Stack Decision" above.
-- Whether tool executions need a wrapping timeout - see Current Focus.
-  Not implemented; needs a decision, not a unilateral default.
-- `captcha_manager.py`'s manual-CAPTCHA wait is a single 120-second
-  sleep then one recheck, not a poll loop - if a human solves it in 5
-  seconds, `check()` still blocks for the full 120s before noticing.
-  Deliberately not touched while fixing the video_downloader pipeline
-  (out of scope - `captcha_manager` is a separate shared library with
-  its own established behavior); noting it here since nobody had
-  written it down before.
+  no Docker daemon available to test it.
+- `captcha_manager.py`'s manual-CAPTCHA wait is a flat 120-second block,
+  not a poll loop - deliberately not touched (separate shared library,
+  video_downloader/CAPTCHA work is deferred).
+
 

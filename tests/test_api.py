@@ -242,3 +242,66 @@ def test_run_sync_defaults_params_to_empty_dict():
 
     assert response.status_code == 200
     assert response.json() == {"result": None}
+
+
+# --------------------------------------------------------------------------
+# Reserved param names (name/background collide with run_tool()'s own args)
+# --------------------------------------------------------------------------
+
+
+def test_create_job_rejects_reserved_param_name_background():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={"tool": "echo", "params": {"background": "x"}},
+    )
+
+    assert response.status_code == 400
+    assert "background" in response.json()["detail"]
+
+
+def test_create_job_rejects_reserved_param_name_name():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={"tool": "echo", "params": {"name": "x"}},
+    )
+
+    assert response.status_code == 400
+    assert "name" in response.json()["detail"]
+
+
+def test_run_sync_rejects_reserved_param_names():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    response = client.post(
+        "/api/v1/tools/echo/run",
+        json={"params": {"name": "x", "background": "y"}},
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "name" in detail
+    assert "background" in detail
+
+
+def test_non_reserved_param_names_are_unaffected():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    try:
+        response = client.post(
+            "/api/v1/jobs", json={"tool": "echo", "params": {"value": 5}}
+        )
+        assert response.status_code == 202
+    finally:
+        kernel.jobs.shutdown()
