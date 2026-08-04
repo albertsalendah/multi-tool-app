@@ -10,6 +10,7 @@ jobs:
   max_workers: 4
   completed_ttl_seconds: 3600
   max_completed_jobs: 500
+  shutdown_timeout_seconds: 10.0
 
 logging:
   level: INFO

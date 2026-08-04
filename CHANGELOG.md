@@ -99,11 +99,21 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
 - `JobManager` now evicts completed jobs by TTL and a max-count cap
   (both configurable, off by default for the bare class) instead of
   retaining every job forever.
+- `JobManager.shutdown()` takes an optional `timeout` and no longer has
+  to block forever on a stuck job - signals cooperative cancellation
+  first, waits up to the bound, then gives up and logs instead of
+  hanging. Wired through `Kernel.shutdown()` with a real default
+  (`jobs.shutdown_timeout_seconds`, 10s) so the app actually uses it.
 
 ### Known limitations
 - No streaming/live-progress endpoint yet; job status is poll-only.
 - `Scheduler._schedules` has the same unbounded-growth issue `JobManager`
   just got fixed for - not addressed yet.
+- `JobManager.shutdown(timeout=...)` can't force-kill a stuck thread
+  (Python doesn't support that) - it gives up waiting and moves on, but
+  a truly hung thread can still delay final interpreter exit via
+  `ThreadPoolExecutor`'s own `atexit` hook. Only an outside-the-process
+  kill (e.g. `docker stop`) is a full backstop for that case.
 
 ## [0.1.0-architecture] - 2026-07-29
 

@@ -126,7 +126,9 @@ class ApplicationKernel:
             return
 
         self.scheduler.shutdown()
-        self.jobs.shutdown()
+        self.jobs.shutdown(
+            timeout=self.config.get("jobs.shutdown_timeout_seconds", 10.0)
+        )
         self.browser.shutdown()
 
         self._initialized = False

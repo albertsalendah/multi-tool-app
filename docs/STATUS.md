@@ -80,20 +80,35 @@
       `snapshot()` used by `GET /jobs/{id}`; `JobManager` now
       TTL/max-count-evicts completed jobs (config-driven, disabled by
       default for the bare class). `Scheduler`'s identical unbounded-
-      growth issue, `JobManager.shutdown()`'s indefinite block on a
-      stuck job, `Scheduler`'s missing REST/CLI surface, `ToolRegistry`'s
-      shared-instance footgun, and `PermissionManager`'s partial
-      enforcement are still open - see
+      growth issue, `Scheduler`'s missing REST/CLI surface,
+      `ToolRegistry`'s shared-instance footgun, and
+      `PermissionManager`'s partial enforcement are still open - see
       `docs/ARCHITECTURE_CHANGELOG.md`'s "Design/Scale Gaps Fixed" for
       detail on what's done vs. still open.
+- [x] `JobManager.shutdown()` bounded wait (2026-08-05): takes an
+      optional `timeout` - signals cooperative cancellation on
+      still-running jobs first, waits up to the bound, then gives up
+      and logs rather than blocking forever. Default (no argument)
+      unchanged - still waits unboundedly. Wired through
+      `Kernel.shutdown()` via `jobs.shutdown_timeout_seconds` (default
+      10s) so the real app actually uses it. Does not solve interpreter-
+      exit-time hangs from `ThreadPoolExecutor`'s own `atexit` hook -
+      that's a container-level (`docker stop`) problem, not a
+      Python-level one. See `docs/ARCHITECTURE_CHANGELOG.md`'s
+      "JobManager.shutdown() Bounded Wait" for detail, including why a
+      real thread-kill or `ProcessPoolExecutor` switch were ruled out.
 
 ## Current Milestone
 None actively in progress. Remaining from Known Technical Debt in
 `docs/ARCHITECTURE_CHANGELOG.md`: Security (explicitly deferred by the
-person while testing locally), the still-open Design/scale gaps listed
-above, and two undecided items, in the person's own stated priority:
-1. General tool-execution timeout design (separate from the
-   BrowserManager watchdog above, which only covers browser hangs)
+person while testing locally), `Scheduler`'s unbounded growth and
+missing REST/CLI surface, `ToolRegistry`'s shared-instance footgun,
+`PermissionManager`'s partial enforcement, and two undecided items, in
+the person's own stated priority:
+1. General tool-execution timeout design (separate from both the
+   BrowserManager watchdog and the JobManager.shutdown() bound above -
+   neither answers "can a specific running job be stopped on demand,
+   mid-run, outside of shutdown")
 2. No authentication on the REST API at all - low risk while
    local-only, real risk the moment this is exposed beyond one machine
 

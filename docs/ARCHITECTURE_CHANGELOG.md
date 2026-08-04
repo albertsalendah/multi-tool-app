@@ -245,11 +245,11 @@ All five fixed 2026-08-04 - see "Real Bugs Fixed" below for detail.
   same issue and is explicitly **not** fixed - out of scope for this
   round, still open. (`JOB_LIFECYCLE.md` documents a "Job Archived"
   state that was never built.)
-- `JobManager.shutdown()` calls `executor.shutdown(wait=True)` - blocks
-  indefinitely if any job is stuck. Not just "the job never finishes" -
-  the whole app can't shut down gracefully either. The new
-  `BrowserManager` watchdog (below) helps for browser-specific hangs
-  but doesn't touch this generally. Still open.
+- ~~`JobManager.shutdown()` calls `executor.shutdown(wait=True)` -
+  blocks indefinitely if any job is stuck~~ - fixed 2026-08-05, see
+  "JobManager.shutdown() Bounded Wait" below. Note: this doesn't touch
+  `Scheduler.shutdown()`, which never blocked on long-running work in
+  the first place (it only cancels pending `Timer`s).
 - `Scheduler` is fully built, tested, wired into the kernel - and has
   zero REST/CLI surface. Currently unreachable from outside the process.
   Still open.
@@ -400,6 +400,63 @@ wiring, plus an untracked-`job_id` no-op case), `tests/test_api.py`
 this round. Also re-verified with a real `uvicorn` boot + `curl`
 against `main.py`'s actual app, not just unit tests.
 
+### JobManager.shutdown() Bounded Wait (2026-08-05)
+Python can't forcibly kill a running thread (unlike the `BrowserManager`
+watchdog above, which kills an actual OS process by PID) - so this
+isn't a real "stop it now," it's the best available approximation:
+signal cooperative cancellation, wait up to a bound, then give up and
+let the executor go without joining the stuck thread.
+
+- `app/job_manager.py`: `JobManager.shutdown()` takes an optional
+  `timeout`. `timeout=None` (the default) is unchanged - waits
+  unboundedly, exactly as before, so every existing no-argument caller
+  keeps its current behavior. `timeout=<seconds>` first calls `.cancel()`
+  on every still-running job's `CancellationToken` (a real chance for
+  any tool that checks `context.raise_if_cancelled()` to stop cleanly
+  within the deadline, not just a passive wait), then waits up to
+  `timeout` total via `future.result(timeout=...)`. Anything still
+  running past the deadline is logged (job IDs named) and left running -
+  the executor is released with `wait=False, cancel_futures=True`
+  rather than blocking further.
+- What this does *not* solve: `ThreadPoolExecutor` registers its own
+  `atexit` hook that joins every worker thread at interpreter shutdown,
+  regardless of what our `shutdown()` does - so a truly stuck thread can
+  still hang final process exit. The real backstop for that is one level
+  further out: `docker stop` sends `SIGTERM`, waits a grace period, then
+  `SIGKILL`s the whole container - same philosophy as the
+  `BrowserManager` watchdog (kill at the OS boundary, don't fight
+  Python's threading model), just at the process level instead of the
+  browser-process level. Ruled out: forcibly killing the thread via
+  `ctypes`/`PyThreadState_SetAsyncExc` (unsafe, doesn't work for threads
+  blocked in C extension calls - which is most of what actually hangs),
+  and switching to `ProcessPoolExecutor` (would let jobs be OS-killed,
+  but `ExecutionContext`/`CancellationToken` hold live locks and thread
+  events that don't survive pickling across a process boundary - a real
+  architectural change, not a contained fix).
+- `config/default.yaml` / `app/kernel.py`: added
+  `jobs.shutdown_timeout_seconds` (default `10.0` - float, not int, so
+  a fractional env var override coerces correctly), wired through
+  `Kernel.shutdown()` so the real app actually uses the bounded path,
+  not just an unused optional parameter.
+
+Tests added to `tests/test_job_manager.py`: default (`timeout=None`)
+still waits unboundedly; a non-cooperative stuck job is given up on
+within the bound and logs a warning naming the job ID; a cooperative
+job (checks `raise_if_cancelled()`) actually stops in time because of
+the cancellation signal. `tests/test_kernel.py` gained a test proving
+the `jobs.shutdown_timeout_seconds` config value is really wired
+through `Kernel -> Config -> JobManager.shutdown()`, not just
+implemented and left unused - this test caught a real bug in the
+process: the config default was `10` (int), and `Config.get()`'s
+coercion (see "Real Bugs Fixed") correctly rejected a fractional env
+var override against an int default and silently fell back, so the
+test's override was being ignored. Fixed by making the default `10.0`
+(float) in both `config/default.yaml` and the `kernel.py` call site.
+Full suite: 149 passed, the same 1 pre-existing unrelated failure.
+Also re-verified with a real `uvicorn` boot + `curl` (normal job
+create/poll still works unaffected) and a real `SIGTERM` against the
+running process.
+
 ### Current Focus
 Nothing actively in progress. Two undecided items carried forward,
 most consequential first:
@@ -462,11 +519,12 @@ for the complete list with detail):
   bypassing the kernel~~ - fixed 2026-08-04, see "Real Bugs Fixed" above.
 - No authentication on the REST API; CORS wide open - see "Full
   Platform Audit" / Current Focus.
-- `JobManager.shutdown()` can block indefinitely on a stuck job;
-  `Scheduler` has no REST/CLI surface; `ToolRegistry` shared tool
+- `Scheduler` has no REST/CLI surface; `ToolRegistry` shared tool
   instances are a footgun for future tool authors; `PermissionManager`
   only enforces `browser` - see "Full Platform Audit" for detail. All
-  still open - not part of the 2026-08-04 "straightforward" batch.
+  still open.
+- ~~`JobManager.shutdown()` can block indefinitely on a stuck job~~ -
+  fixed 2026-08-05, see "JobManager.shutdown() Bounded Wait" above.
 - ~~`JobManager._jobs` never cleaned up~~ - fixed 2026-08-04 for
   `JobManager` (TTL + max-count eviction). `Scheduler._schedules` has
   the same issue and is explicitly **not** fixed - out of scope for

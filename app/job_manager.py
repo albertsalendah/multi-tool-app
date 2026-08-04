@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ from uuid import uuid4
 
 from app.cancellation import CancellationRequested, CancellationToken
 from app.execution_context import ExecutionContext
+
+log = logging.getLogger("MultiToolApp")
 
 
 class JobStatus(str, Enum):
@@ -265,5 +268,66 @@ class JobManager:
 
         return job.future.done() if job else False
 
-    def shutdown(self):
-        self._executor.shutdown(wait=True)
+    def shutdown(self, timeout: float | None = None):
+        """Stop the executor and wait for in-flight jobs.
+
+        timeout=None (default): waits unboundedly, exactly as before -
+        every existing no-argument caller keeps its current behavior.
+
+        timeout=<seconds>: signals cooperative cancellation on every
+        still-running job first (so a job checking
+        context.raise_if_cancelled() gets a real chance to stop
+        cleanly), then waits up to `timeout` total for all of them to
+        finish. Anything still running past the deadline is logged and
+        left running - Python cannot forcibly stop a running thread.
+        The executor is then released without waiting further
+        (cancel_futures=True drops anything not yet started), but its
+        own atexit hook will still join a truly-stuck worker thread at
+        interpreter exit; only something outside the process (e.g.
+        `docker stop`) can force that case.
+        """
+        if timeout is None:
+            self._executor.shutdown(wait=True)
+            return
+
+        with self._lock:
+            running = {
+                job.future: job.id
+                for job in self._jobs.values()
+                if job.future is not None and not job.future.done()
+            }
+
+        for job_id in running.values():
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job.cancellation_token.cancel()
+
+        deadline = time.time() + timeout
+        stuck_ids = []
+
+        for future, job_id in running.items():
+            remaining = deadline - time.time()
+
+            if remaining <= 0:
+                if not future.done():
+                    stuck_ids.append(job_id)
+                continue
+
+            try:
+                future.result(timeout=remaining)
+            except TimeoutError:
+                stuck_ids.append(job_id)
+            except Exception:
+                pass  # job failed/cancelled - no longer running, that's fine
+
+        if stuck_ids:
+            log.warning(
+                f"JobManager.shutdown(timeout={timeout}) gave up waiting "
+                f"on {len(stuck_ids)} still-running job(s): {stuck_ids}. "
+                "Python cannot forcibly stop a running thread - these "
+                "will keep running until they finish on their own, or "
+                "until something outside the process (e.g. `docker "
+                "stop`) kills it."
+            )
+
+        self._executor.shutdown(wait=False, cancel_futures=True)

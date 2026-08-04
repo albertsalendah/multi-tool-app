@@ -1,5 +1,6 @@
+import logging
 import time
-from threading import Event
+from threading import Event, Thread
 
 from app.container import ServiceContainer
 from app.events import EventBus
@@ -168,3 +169,77 @@ def test_running_job_is_never_evicted_by_ttl_or_count():
         manager.wait(running_id, timeout=1)
     finally:
         manager.shutdown()
+
+
+def test_shutdown_without_timeout_still_waits_unboundedly():
+    """Regression test: shutdown() with no arguments must keep its
+    original behavior exactly - block until every job finishes, no
+    matter how long that takes."""
+    manager = JobManager(max_workers=1)
+    started = Event()
+    release = Event()
+
+    def slow():
+        started.set()
+        release.wait(timeout=2)
+        return "done"
+
+    job_id = manager.submit(slow)
+    assert started.wait(timeout=1)
+
+    def release_soon():
+        time.sleep(0.2)
+        release.set()
+
+    Thread(target=release_soon, daemon=True).start()
+
+    manager.shutdown()  # no timeout - must not return before release fires
+
+    assert manager.status(job_id) == JobStatus.COMPLETED
+
+
+def test_shutdown_with_timeout_gives_up_on_a_stuck_job_and_logs_a_warning(caplog):
+    manager = JobManager(max_workers=1)
+    started = Event()
+
+    def stuck():
+        started.set()
+        # Deliberately ignores cancellation - simulates a non-cooperative
+        # hang (e.g. blocked in a C extension call). Self-terminates
+        # after a bound so this test doesn't leak a runaway thread past
+        # the end of the test suite.
+        time.sleep(0.4)
+        return "finally done"
+
+    job_id = manager.submit(stuck)
+    assert started.wait(timeout=1)
+
+    start = time.time()
+    with caplog.at_level(logging.WARNING):
+        manager.shutdown(timeout=0.05)
+    elapsed = time.time() - start
+
+    assert elapsed < 0.4  # gave up well before the job's own 0.4s finishes
+    assert any(job_id in record.message for record in caplog.records)
+
+
+def test_shutdown_with_timeout_signals_cancellation_and_a_cooperative_job_stops():
+    manager = JobManager(max_workers=1)
+    services = ServiceContainer()
+    context = ExecutionContext(tool_name="cooperative", services=services)
+    started = Event()
+
+    def cooperative():
+        started.set()
+        while True:
+            context.raise_if_cancelled()
+            time.sleep(0.01)
+
+    job_id = manager.submit(cooperative, context=context)
+    assert started.wait(timeout=1)
+
+    # Generous timeout - this only needs to prove the job actually stops
+    # (because shutdown() signals cancellation), not race a tight clock.
+    manager.shutdown(timeout=1)
+
+    assert manager.status(job_id) == JobStatus.CANCELLED
