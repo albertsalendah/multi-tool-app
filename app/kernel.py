@@ -187,21 +187,20 @@ class ApplicationKernel:
             tool=name,
         )
 
+        def _run_and_announce():
+            # Mirrors the old sync-only path: tool.finished fires once the
+            # lifecycle succeeds, not on failure/cancellation (JobManager's
+            # own job.completed/job.failed events already cover those).
+            # Used for both foreground and background now, so this no
+            # longer only fires for synchronous execution.
+            result = self._run_tool_lifecycle(tool, context, kwargs)
+            self.events.emit("tool.finished", tool=name, result=result)
+            return result
+
         if background:
-            return self.jobs.submit(
-                lambda: self._run_tool_lifecycle(tool, context, kwargs),
-                context=context,
-            )
+            return self.jobs.submit(_run_and_announce, context=context)
 
-        result = self._run_tool_lifecycle(tool, context, kwargs)
-
-        self.events.emit(
-            "tool.finished",
-            tool=name,
-            result=result,
-        )
-
-        return result
+        return _run_and_announce()
 
     def run_workflow(
         self,

@@ -213,33 +213,22 @@ memory. Findings, by severity - fixed ones marked, everything else
 still open:
 
 **Real bugs (confirmed by reproduction, not theoretical):**
+All five fixed 2026-08-04 - see "Real Bugs Fixed" below for detail.
 - ~~`Config.get()` doesn't type-coerce environment variable
-  overrides~~ - NOT fixed this round (out of the "minor" batch that
-  was fixed - see below). Confirmed concretely: `JOBS_MAX_WORKERS=8`
-  crashes kernel construction (`TypeError`, comparing `str` to `int`
-  inside `ThreadPoolExecutor`); `BROWSER_HEADLESS=false` silently does
-  the *opposite* of what's intended (non-empty string is truthy, so
-  headless stays `True`). Still open.
-- `tool.finished` event never fires for background jobs - only the
-  synchronous path in `kernel.run_tool()` emits it. Since background
-  execution is the primary path now, anything built on `tool.finished`
-  for logging/monitoring would silently miss most executions. Still open.
-- `context.report_progress()` is completely disconnected from
-  `job.progress` - a tool can call it, but `GET /api/v1/jobs/{id}`'s
-  `progress` field reads from a separate `Job.progress` attribute
-  nothing ever updates mid-run. Shows `0` the whole time, then jumps to
-  `100` on completion regardless of what a tool reports. Still open.
-- `POST /tools/{name}/run`'s error handling can misclassify a tool's
-  own internal `KeyError` bug as `"Unknown tool"` (404) - the
-  `except KeyError` wraps the whole `kernel.run_tool()` call, including
-  the tool's own `run()`. Still open (not part of the fixed batch -
-  fixing it means narrowing that except clause, deliberately left for
-  next time since it wasn't in the requested 15-20 list).
+  overrides~~ - fixed. `JOBS_MAX_WORKERS=8` crashed kernel construction
+  (`TypeError`, comparing `str` to `int` inside `ThreadPoolExecutor`);
+  `BROWSER_HEADLESS=false` silently did the *opposite* of what's
+  intended (non-empty string is truthy, so headless stayed `True`).
+- ~~`tool.finished` event never fires for background jobs~~ - fixed.
+  Only the synchronous path in `kernel.run_tool()` used to emit it.
+- ~~`context.report_progress()` is completely disconnected from
+  `job.progress`~~ - fixed. Used to show `0` the whole run, then jump
+  to `100` on completion regardless of what a tool reported.
+- ~~`POST /tools/{name}/run`'s error handling can misclassify a tool's
+  own internal `KeyError` bug as `"Unknown tool"` (404)~~ - fixed.
 - ~~`main.py`'s comment above `include_router(video_downloader_router)`
-  claims it "still bypasses the kernel directly"~~ - **still stale,
-  not fixed this round** (also wasn't in the requested batch). True
-  when written (Stage 1 commit), false since Stage 2. Quick fix
-  whenever someone's next in that file.
+  claims it "still bypasses the kernel directly"~~ - fixed (was true
+  when written pre-Stage-2, stale since).
 
 **Security (not addressed this round - explicitly bigger than "minor"):**
 - No authentication anywhere on the REST API - anyone who can reach it
@@ -315,6 +304,48 @@ conversation about this before assuming a naive timeout would be enough).
   browser-specific case concretely fixable once someone opts a tool
   into it.
 
+### Real Bugs Fixed (2026-08-04)
+The five "real bugs" from the Full Platform Audit above. Security and
+design/scale gaps from that audit remain open - not touched this round.
+
+- `app/config.py`: `Config.get()` now coerces an env var override to
+  the type implied by the caller's `default` (bool checked before int,
+  since `isinstance(True, int)` is `True`; then int; then float; else
+  the raw string is returned unchanged). Verified against a real server
+  boot with `JOBS_MAX_WORKERS=8 BROWSER_HEADLESS=false` - previously
+  crashed kernel construction, now boots clean.
+- `app/kernel.py`: `run_tool()`'s foreground and background paths now
+  share one `_run_and_announce()` closure, so `tool.finished` fires for
+  both instead of only the synchronous path. Same semantics as before
+  otherwise - fires on success only, not on failure/cancellation
+  (`job.completed`/`job.failed` already cover those).
+- `app/job_manager.py`: `JobManager` now subscribes to `tool.progress`
+  on the event bus (same pattern the Kernel already uses for logging)
+  and updates the matching `Job.progress` by `job_id`. Foreground
+  executions carry a `job_id` never registered in `JobManager._jobs` -
+  the handler no-ops safely via `dict.get()` returning `None`.
+- `app/api.py`: `run_tool_sync()`'s redundant `except KeyError -> 404`
+  around the `kernel.run_tool()` call removed - tool existence is
+  already confirmed via `get_manifest()` earlier in the same function,
+  so a `KeyError` past that point is the tool's own bug and now
+  surfaces as an uncaught exception (a real 500 outside of tests)
+  instead of a misleading "Unknown tool".
+- `main.py`: corrected the comment above
+  `include_router(video_downloader_router)`.
+
+Also corrected while in the area: `CHANGELOG.md`'s "Known limitations"
+still claimed `video_downloader` bypasses the Kernel/REST API - false
+since Stage 2, removed.
+
+Tests added: `tests/test_config.py` (env var coercion, 6 cases),
+`tests/test_kernel.py` (new file - `tool.finished` for both foreground
+and background), `tests/test_job_manager.py` (new file - progress
+wiring, plus an untracked-`job_id` no-op case), `tests/test_api.py`
+(the `KeyError`-misclassification regression). Full suite: 130 passed,
+1 pre-existing unrelated failure (see below) - up from 119/1 before
+this round. Also re-verified with a real `uvicorn` boot + `curl`
+against `main.py`'s actual app, not just unit tests.
+
 ### Current Focus
 Nothing actively in progress. Two undecided items carried forward,
 most consequential first:
@@ -364,15 +395,17 @@ for the complete list with detail):
   (earlier round).
 - ~~`libraries/captcha_manager` never actually exercised~~ - now
   exercised by `tools/video_downloader_interactive/pipeline.py`.
-- `Config.get()` env-var overrides aren't type-coerced (crashes for
-  ints, silently wrong for bools) - see "Full Platform Audit."
-- `tool.finished` never fires for background jobs - see "Full Platform Audit."
-- `context.report_progress()` disconnected from `job.progress` - see
-  "Full Platform Audit."
-- `POST /tools/{name}/run`'s `KeyError` handling can misclassify a
-  tool's own internal bug as "Unknown tool" - see "Full Platform Audit."
-- `main.py`'s stale comment about video_downloader_router still
-  bypassing the kernel - see "Full Platform Audit."
+- ~~`Config.get()` env-var overrides aren't type-coerced~~ - fixed
+  2026-08-04, see "Real Bugs Fixed" above.
+- ~~`tool.finished` never fires for background jobs~~ - fixed
+  2026-08-04, see "Real Bugs Fixed" above.
+- ~~`context.report_progress()` disconnected from `job.progress`~~ -
+  fixed 2026-08-04, see "Real Bugs Fixed" above.
+- ~~`POST /tools/{name}/run`'s `KeyError` handling can misclassify a
+  tool's own internal bug as "Unknown tool"~~ - fixed 2026-08-04, see
+  "Real Bugs Fixed" above.
+- ~~`main.py`'s stale comment about video_downloader_router still
+  bypassing the kernel~~ - fixed 2026-08-04, see "Real Bugs Fixed" above.
 - No authentication on the REST API; CORS wide open - see "Full
   Platform Audit" / Current Focus.
 - `JobManager`/`Scheduler` never clean up old entries; no

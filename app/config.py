@@ -39,7 +39,7 @@ class Config:
         env_key = key.upper().replace(".", "_")
 
         if env_key in os.environ:
-            return os.environ[env_key]
+            return self._coerce(os.environ[env_key], default, env_key)
 
         value = self._data
 
@@ -53,3 +53,36 @@ class Config:
                 return default
 
         return value
+
+    @staticmethod
+    def _coerce(raw: str, default, env_key: str):
+        """Env vars are always strings; coerce to the type implied by the
+        caller's default so `config.get("jobs.max_workers", 4)` returns an
+        int (not "8"), and `config.get("browser.headless", True)` treats
+        "false" as False instead of a truthy non-empty string.
+
+        bool must be checked before int - isinstance(True, int) is True."""
+        if isinstance(default, bool):
+            return raw.strip().lower() in ("1", "true", "yes", "on")
+
+        if isinstance(default, int):
+            try:
+                return int(raw)
+            except ValueError:
+                log.warning(
+                    f"Env var '{env_key}'={raw!r} is not a valid int - "
+                    f"using default {default!r}."
+                )
+                return default
+
+        if isinstance(default, float):
+            try:
+                return float(raw)
+            except ValueError:
+                log.warning(
+                    f"Env var '{env_key}'={raw!r} is not a valid float - "
+                    f"using default {default!r}."
+                )
+                return default
+
+        return raw

@@ -70,10 +70,26 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
   an unhandled 500.
 - Test suite covering all of the above (`tests/`).
 
+### Fixed
+- `Config.get()` now coerces environment variable overrides to the type
+  implied by the caller's `default` (bool/int/float) instead of always
+  returning a raw string - `JOBS_MAX_WORKERS=8` no longer crashes kernel
+  construction, and `BROWSER_HEADLESS=false` no longer silently stays
+  headless.
+- `tool.finished` now fires for background job execution, not just the
+  synchronous path - it previously went completely unnoticed for the
+  primary (background) execution mode.
+- `context.report_progress()` is now wired through to `Job.progress` -
+  `GET /jobs/{id}` reflects a tool's reported progress mid-run instead
+  of staying at 0% until completion.
+- `POST /api/v1/tools/{name}/run` no longer misreports a tool's own
+  internal `KeyError` bug as `404 Unknown tool` - that response is now
+  reserved for an actually-unknown tool name.
+- `main.py`'s stale comment claiming `video_downloader_router` still
+  bypasses the kernel corrected (false since the Stage 2 web UI
+  reconciliation above).
+
 ### Known limitations
-- `video_downloader` (the one real tool so far) still bypasses the
-  Kernel/REST API entirely via its own bespoke router - reconciling
-  that is intentionally deferred until more tools exist.
 - No streaming/live-progress endpoint yet; job status is poll-only.
 
 ## [0.1.0-architecture] - 2026-07-29

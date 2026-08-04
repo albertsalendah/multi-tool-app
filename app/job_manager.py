@@ -44,6 +44,20 @@ class JobManager:
         self._lock = Lock()
         self._events = event_bus
 
+        if self._events:
+            # Bridges ExecutionContext.report_progress() (which only knows
+            # how to emit an event) to Job.progress (which GET /jobs/{id}
+            # actually reads) - same subscribe-on-the-event-bus pattern the
+            # Kernel already uses for logging. Foreground executions carry
+            # a job_id that was never registered in self._jobs, so
+            # self._jobs.get() returns None there - safe no-op.
+            self._events.subscribe("tool.progress", self._handle_tool_progress)
+
+    def _handle_tool_progress(self, tool, progress, message, job_id):
+        job = self._jobs.get(job_id)
+        if job is not None:
+            job.progress = progress
+
     def submit(
         self,
         func,

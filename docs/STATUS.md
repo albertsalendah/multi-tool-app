@@ -64,10 +64,20 @@
       collides with `run_tool()`'s own `name`/`background` arguments
       (was an unhandled 500, now a clean 400).
 
+- [x] Audit "Real bugs" fixed (2026-08-04): env var type-coercion in
+      `Config.get()`; `tool.finished` now fires for background jobs;
+      `context.report_progress()` wired through to `Job.progress`;
+      `POST /tools/{name}/run` no longer misreports a tool's own
+      internal `KeyError` as `404 Unknown tool`; `main.py`'s stale
+      router comment corrected. See `docs/ARCHITECTURE_CHANGELOG.md`'s
+      "Real Bugs Fixed" for detail.
+
 ## Current Milestone
-None actively in progress. Sitting on several undecided items - see
-Known Technical Debt in `docs/ARCHITECTURE_CHANGELOG.md` for the full
-list. The two most consequential, in the person's own stated priority:
+None actively in progress. The "Real bugs" bucket of the platform
+audit is now clear. Remaining from Known Technical Debt in
+`docs/ARCHITECTURE_CHANGELOG.md`: the Security and Design/scale-gap
+findings (all still open), plus two undecided items, in the person's
+own stated priority:
 1. General tool-execution timeout design (separate from the
    BrowserManager watchdog above, which only covers browser hangs)
 2. No authentication on the REST API at all - low risk while

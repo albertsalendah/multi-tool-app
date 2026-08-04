@@ -63,10 +63,10 @@ app.include_router(platform_api_router)
 # 3. one card in static/index.html
 # No other part of this file needs to change.
 #
-# video_downloader's router is unchanged and still bypasses the kernel
-# directly (calls fetch_video_info/start_session itself) rather than going
-# through platform_api_router / kernel.run_tool(). Reconciling that is
-# deferred until more tools exist and the right shared shape is clearer.
+# video_downloader_router now only serves the tool's page (GET
+# /tools/video-downloader) - both the fast lookup and interactive/CAPTCHA
+# paths go entirely through platform_api_router / kernel.run_tool() (see
+# static/app.js and tools/video_downloader/router.py).
 app.include_router(video_downloader_router)
 
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")

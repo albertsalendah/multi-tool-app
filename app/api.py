@@ -189,10 +189,11 @@ def run_tool_sync(
 
     _reject_reserved_params(body.params)
 
+    # Tool existence was already confirmed via get_manifest() above, so a
+    # KeyError from here on is the tool's own bug, not "unknown tool" -
+    # let it surface as an uncaught 500 instead of a misleading 404.
     try:
         result = kernel.run_tool(name, background=False, **body.params)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown tool: '{name}'")
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

@@ -1,5 +1,6 @@
 import time
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -190,6 +191,18 @@ class RaisingRuntimeTool(BaseTool):
         raise RuntimeError("bad input")
 
 
+class RaisingKeyErrorTool(BaseTool):
+    """Simulates a tool with its own internal bug (not 'unknown tool') -
+    confirms run_tool_sync doesn't misreport it as a 404. Manifest
+    existence is already confirmed via get_manifest() before the tool
+    ever runs, so a KeyError from here on is the tool's own bug."""
+
+    name = "raising_keyerror"
+
+    def run(self, *, context=None, **kwargs):
+        raise KeyError("some_internal_key")
+
+
 def test_run_sync_returns_the_tool_result_directly():
     kernel = ApplicationKernel()
     _register(kernel, EchoTool())
@@ -231,6 +244,19 @@ def test_run_sync_maps_tool_runtime_error_to_400():
 
     assert response.status_code == 400
     assert "bad input" in response.json()["detail"]
+
+
+def test_run_sync_tool_internal_keyerror_is_not_misreported_as_unknown_tool():
+    """Regression test: a tool's own KeyError bug used to be caught by
+    the same 'except KeyError' guarding the unknown-tool case above and
+    misreported as 404 'Unknown tool'. It should now surface uncaught
+    (a real 500 outside of tests, where exceptions aren't re-raised)."""
+    kernel = ApplicationKernel()
+    _register(kernel, RaisingKeyErrorTool())
+    client = _client_with_kernel(kernel)
+
+    with pytest.raises(KeyError):
+        client.post("/api/v1/tools/raising_keyerror/run", json={"params": {}})
 
 
 def test_run_sync_defaults_params_to_empty_dict():
