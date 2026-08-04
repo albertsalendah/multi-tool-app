@@ -45,7 +45,7 @@ def test_list_tools_returns_registered_tools():
     client = _client_for(kernel)
 
     assert client.list_tools() == [
-        {"name": "echo", "version": "1.0.0", "description": ""}
+        {"name": "echo", "version": "1.0.0", "description": "", "capabilities": []}
     ]
 
 

@@ -88,9 +88,22 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
 - `main.py`'s stale comment claiming `video_downloader_router` still
   bypasses the kernel corrected (false since the Stage 2 web UI
   reconciliation above).
+- `GET /api/v1/tools` now includes each tool's `capabilities`.
+- `EventBus` and `ServiceContainer` are now thread-safe, and a failing
+  event listener can no longer break other listeners or propagate back
+  into whatever emitted the event.
+- `Job`'s internal fields (`status`/`result`/`error`/`progress`) are now
+  updated atomically under a lock instead of as separate unlocked
+  assignments; `GET /jobs/{id}` reads a consistent snapshot instead of
+  separate attribute accesses.
+- `JobManager` now evicts completed jobs by TTL and a max-count cap
+  (both configurable, off by default for the bare class) instead of
+  retaining every job forever.
 
 ### Known limitations
 - No streaming/live-progress endpoint yet; job status is poll-only.
+- `Scheduler._schedules` has the same unbounded-growth issue `JobManager`
+  just got fixed for - not addressed yet.
 
 ## [0.1.0-architecture] - 2026-07-29
 

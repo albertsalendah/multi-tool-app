@@ -33,6 +33,8 @@ class ApplicationKernel:
         self.jobs = JobManager(
             event_bus=self.events,
             max_workers=self.config.get("jobs.max_workers", 4),
+            completed_ttl_seconds=self.config.get("jobs.completed_ttl_seconds", 3600),
+            max_completed_jobs=self.config.get("jobs.max_completed_jobs", 500),
         )
         self.scheduler = Scheduler(self.jobs)
         self.workflow = WorkflowEngine(self)

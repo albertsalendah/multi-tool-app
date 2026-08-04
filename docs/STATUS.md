@@ -71,13 +71,27 @@
       internal `KeyError` as `404 Unknown tool`; `main.py`'s stale
       router comment corrected. See `docs/ARCHITECTURE_CHANGELOG.md`'s
       "Real Bugs Fixed" for detail.
+- [x] Audit "Design/scale gaps" partially fixed (2026-08-04, the
+      "straightforward" subset plus JobManager cleanup - explicitly
+      chosen over the ones needing a design call first): `GET
+      /api/v1/tools` now exposes `capabilities`; `EventBus`/
+      `ServiceContainer` gained locking + listener-failure isolation;
+      `Job` gained its own lock, an atomic `_update()`, and a
+      `snapshot()` used by `GET /jobs/{id}`; `JobManager` now
+      TTL/max-count-evicts completed jobs (config-driven, disabled by
+      default for the bare class). `Scheduler`'s identical unbounded-
+      growth issue, `JobManager.shutdown()`'s indefinite block on a
+      stuck job, `Scheduler`'s missing REST/CLI surface, `ToolRegistry`'s
+      shared-instance footgun, and `PermissionManager`'s partial
+      enforcement are still open - see
+      `docs/ARCHITECTURE_CHANGELOG.md`'s "Design/Scale Gaps Fixed" for
+      detail on what's done vs. still open.
 
 ## Current Milestone
-None actively in progress. The "Real bugs" bucket of the platform
-audit is now clear. Remaining from Known Technical Debt in
-`docs/ARCHITECTURE_CHANGELOG.md`: the Security and Design/scale-gap
-findings (all still open), plus two undecided items, in the person's
-own stated priority:
+None actively in progress. Remaining from Known Technical Debt in
+`docs/ARCHITECTURE_CHANGELOG.md`: Security (explicitly deferred by the
+person while testing locally), the still-open Design/scale gaps listed
+above, and two undecided items, in the person's own stated priority:
 1. General tool-execution timeout design (separate from the
    BrowserManager watchdog above, which only covers browser hangs)
 2. No authentication on the REST API at all - low risk while

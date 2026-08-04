@@ -1,27 +1,35 @@
 from __future__ import annotations
 
+from threading import Lock
+
 
 class ServiceContainer:
     def __init__(self):
         self._services = {}
+        self._lock = Lock()
 
     def register(self, name: str, service):
-        if name in self._services:
-            raise ValueError(f"Service '{name}' already registered.")
+        with self._lock:
+            if name in self._services:
+                raise ValueError(f"Service '{name}' already registered.")
 
-        self._services[name] = service
+            self._services[name] = service
 
     def unregister(self, name: str):
-        self._services.pop(name, None)
+        with self._lock:
+            self._services.pop(name, None)
 
     def get(self, name: str):
-        if name not in self._services:
-            raise KeyError(f"Service '{name}' not found.")
+        with self._lock:
+            if name not in self._services:
+                raise KeyError(f"Service '{name}' not found.")
 
-        return self._services[name]
+            return self._services[name]
 
     def has(self, name: str) -> bool:
-        return name in self._services
+        with self._lock:
+            return name in self._services
 
     def list_services(self):
-        return list(self._services.keys())
+        with self._lock:
+            return list(self._services.keys())

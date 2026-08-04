@@ -89,6 +89,9 @@ class ToolRegistry:
                 "name": t.name,
                 "version": t.version,
                 "description": t.description,
+                "capabilities": list(
+                    getattr(self._manifests.get(t.name), "capabilities", [])
+                ),
             }
             for t in self._tools.values()
         ]

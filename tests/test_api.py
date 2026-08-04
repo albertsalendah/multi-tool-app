@@ -78,8 +78,18 @@ def test_list_tools_returns_registered_tool_info():
 
     assert response.status_code == 200
     assert response.json() == [
-        {"name": "echo", "version": "1.0.0", "description": ""}
+        {"name": "echo", "version": "1.0.0", "description": "", "capabilities": []}
     ]
+
+
+def test_list_tools_exposes_a_tools_declared_capabilities():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool(), capabilities=["network", "filesystem"])
+    client = _client_with_kernel(kernel)
+
+    response = client.get("/api/v1/tools")
+
+    assert response.json()[0]["capabilities"] == ["network", "filesystem"]
 
 
 # --------------------------------------------------------------------------

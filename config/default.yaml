@@ -8,6 +8,8 @@ browser:
 
 jobs:
   max_workers: 4
+  completed_ttl_seconds: 3600
+  max_completed_jobs: 500
 
 logging:
   level: INFO

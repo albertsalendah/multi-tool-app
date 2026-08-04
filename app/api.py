@@ -54,6 +54,7 @@ class ToolInfo(BaseModel):
     name: str
     version: str
     description: str
+    capabilities: list[str] = []
 
 
 class HealthResponse(BaseModel):
@@ -140,12 +141,14 @@ def get_job(job_id: str, kernel: ApplicationKernel = Depends(get_kernel)):
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    snapshot = job.snapshot()
+
     return JobResponse(
-        job_id=job.id,
-        status=job.status.value,
-        progress=job.progress,
-        result=job.result,
-        error=job.error,
+        job_id=snapshot.id,
+        status=snapshot.status.value,
+        progress=snapshot.progress,
+        result=snapshot.result,
+        error=snapshot.error,
     )
 
 

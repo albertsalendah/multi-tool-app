@@ -239,35 +239,89 @@ All five fixed 2026-08-04 - see "Real Bugs Fixed" below for detail.
   the point above, not just theoretical.
 
 **Design/scale gaps (not bugs, real capacity/capability gaps):**
-- `JobManager._jobs` / `Scheduler._schedules` grow forever - no
-  cleanup, eviction, or archival. Unbounded memory growth on a
-  long-running server. (`JOB_LIFECYCLE.md` documents a "Job Archived"
+- ~~`JobManager._jobs` grows forever - no cleanup, eviction, or
+  archival~~ - fixed 2026-08-04 for `JobManager` specifically (TTL +
+  max-count eviction of completed jobs). `Scheduler._schedules` has the
+  same issue and is explicitly **not** fixed - out of scope for this
+  round, still open. (`JOB_LIFECYCLE.md` documents a "Job Archived"
   state that was never built.)
 - `JobManager.shutdown()` calls `executor.shutdown(wait=True)` - blocks
   indefinitely if any job is stuck. Not just "the job never finishes" -
   the whole app can't shut down gracefully either. The new
   `BrowserManager` watchdog (below) helps for browser-specific hangs
-  but doesn't touch this generally.
+  but doesn't touch this generally. Still open.
 - `Scheduler` is fully built, tested, wired into the kernel - and has
   zero REST/CLI surface. Currently unreachable from outside the process.
-- `GET /api/v1/tools` doesn't expose a tool's `capabilities` - no way
-  for a caller to know a tool needs `browser` (and might run long)
-  without trying it and getting refused, or reading source.
+  Still open.
+- ~~`GET /api/v1/tools` doesn't expose a tool's `capabilities`~~ - fixed
+  2026-08-04.
 - `ToolRegistry` reuses one shared tool instance across every
   execution, forever. Handled correctly for the interactive tool via
   `context.set_state()`, but it's a footgun for any future tool author
-  who stores state on `self` instead.
-- `EventBus.emit()` doesn't isolate listener failures (one bad
-  subscriber breaks the rest, and whatever called `emit()`), and
-  neither it nor `ServiceContainer` has any locking. Low practical risk
-  today (all current listeners are simple `log.info()` calls), worth
-  knowing as the app grows.
+  who stores state on `self` instead. Still open.
+- ~~`EventBus.emit()` doesn't isolate listener failures, and neither it
+  nor `ServiceContainer` has any locking~~ - fixed 2026-08-04.
 - `PermissionManager` only really enforces the `browser` capability -
   `network`/`filesystem`/`captcha`/`clipboard`/`database` are
   declared-but-unchecked (map to `None` in `_services`). Worth
-  confirming this is intentional rather than assumed-done.
+  confirming this is intentional rather than assumed-done. Still open.
 
 **Minor - six of these were fixed this round, see below for which.**
+
+### Design/Scale Gaps Fixed (2026-08-04)
+Three of the six items above, plus the two Job thread-safety items from
+Known Technical Debt below. Security, and the remaining three
+Design/scale gaps (JobManager.shutdown() blocking, Scheduler's missing
+REST/CLI surface, ToolRegistry's shared-instance footgun,
+PermissionManager's partial enforcement), stay open - the person
+explicitly deferred Security and said "straightforward ones" plus
+JobManager cleanup for this round, not the ones needing a design call.
+
+- `app/tool_registry.py`: `list_tool_info()` now includes each tool's
+  `capabilities` (read from the matching manifest); `app/api.py`'s
+  `ToolInfo` model gained the field to match.
+- `app/events.py`: `EventBus` gained a lock around
+  subscribe/unsubscribe/emit/clear. `emit()` takes a snapshot of
+  listeners under the lock, then calls them outside of it (avoids
+  deadlocking a plain `Lock` against a listener that itself
+  subscribes/unsubscribes/emits), and now wraps each callback in
+  `try/except` so one bad subscriber can't break the rest or propagate
+  back into whatever emitted the event.
+- `app/container.py`: `ServiceContainer` gained the same lock around
+  every method.
+- `app/job_manager.py`: `Job` now has its own lock and a `_update()`
+  method that applies multiple field changes (e.g.
+  `status`+`result`+`progress` together) atomically instead of as
+  separate unlocked assignments, plus a `snapshot()` method returning a
+  frozen `JobSnapshot` dataclass for a consistent multi-field read.
+  `app/api.py`'s `GET /jobs/{id}` now reads via `job.snapshot()` instead
+  of separate attribute accesses.
+- `app/job_manager.py`: `JobManager` takes `completed_ttl_seconds` and
+  `max_completed_jobs` (both default `None`/disabled - a bare
+  `JobManager()`, as used throughout the test suite, keeps every job
+  forever exactly as before). `submit()` opportunistically prunes
+  terminal (completed/failed/cancelled) jobs before adding the new one:
+  TTL-expired ones first, then oldest-completed-first if still over the
+  count cap. Pending/running jobs are never touched by either
+  mechanism. This is lazy pruning, not a background sweep - an expired
+  or over-cap job isn't actually removed until the *next* `submit()`
+  call, which is an accepted trade for not running a second always-on
+  thread just for housekeeping.
+- `config/default.yaml` / `app/kernel.py`: added `jobs.completed_ttl_seconds`
+  (default `3600`) and `jobs.max_completed_jobs` (default `500`), wired
+  through to `JobManager` - real cleanup is on by default for the actual
+  app, off by default for the bare class.
+
+Tests added: `tests/test_events.py` and `tests/test_container.py` (both
+new files - basic behavior, listener-failure isolation, and a
+real-threads concurrency smoke test for each); `tests/test_job_manager.py`
+gained `Job.snapshot()`, TTL eviction, max-count eviction
+(oldest-first), and a "running job is never evicted regardless of
+TTL/count" test; `tests/test_api.py` gained a capabilities-exposure
+case. Full suite: 145 passed, the same 1 pre-existing unrelated
+failure. Also re-verified with a real `uvicorn` boot: `GET /tools`
+capabilities in the response, and a full job create/poll round trip
+through the new locking/snapshot/cleanup code path.
 
 ### BrowserManager: PID Tracking + Watchdog
 Concrete fix for the "stuck browser hang" case discussed at length
@@ -408,17 +462,25 @@ for the complete list with detail):
   bypassing the kernel~~ - fixed 2026-08-04, see "Real Bugs Fixed" above.
 - No authentication on the REST API; CORS wide open - see "Full
   Platform Audit" / Current Focus.
-- `JobManager`/`Scheduler` never clean up old entries; no
-  general tool-execution timeout; `Scheduler` has no REST/CLI surface;
-  `GET /api/v1/tools` doesn't expose capabilities; shared tool
-  instances are a footgun for future tool authors; `EventBus`/
-  `ServiceContainer` have no locking or listener isolation;
-  `PermissionManager` only enforces `browser` - see "Full Platform
-  Audit" for detail on all of these.
-- Make Job updates thread-safe - `Job.status` / `.result` / `.error` /
-  `.progress` are still set without a lock in `JobManager`.
-- Add immutable job snapshots - `GET /jobs/{id}` gives a read-only view
-  at the API layer, but there's no internal immutable snapshot type.
+- `JobManager.shutdown()` can block indefinitely on a stuck job;
+  `Scheduler` has no REST/CLI surface; `ToolRegistry` shared tool
+  instances are a footgun for future tool authors; `PermissionManager`
+  only enforces `browser` - see "Full Platform Audit" for detail. All
+  still open - not part of the 2026-08-04 "straightforward" batch.
+- ~~`JobManager._jobs` never cleaned up~~ - fixed 2026-08-04 for
+  `JobManager` (TTL + max-count eviction). `Scheduler._schedules` has
+  the same issue and is explicitly **not** fixed - out of scope for
+  this round.
+- ~~`GET /api/v1/tools` doesn't expose capabilities~~ - fixed
+  2026-08-04, see "Design/Scale Gaps Fixed" above.
+- ~~`EventBus`/`ServiceContainer` have no locking or listener
+  isolation~~ - fixed 2026-08-04, see "Design/Scale Gaps Fixed" above.
+- ~~Make Job updates thread-safe~~ - fixed 2026-08-04: `Job` now has its
+  own lock and an atomic `_update()` used for every compound field
+  change. See "Design/Scale Gaps Fixed" above.
+- ~~Add immutable job snapshots~~ - fixed 2026-08-04: `Job.snapshot()`
+  returns a frozen `JobSnapshot`; `GET /jobs/{id}` uses it. See
+  "Design/Scale Gaps Fixed" above.
 - `tests/test_execution_context.py::test_kernel_passes_context_for_foreground_and_background_execution`
   fails - its `ContextTool` still expects `kwargs["services"]`, but
   `kernel.run_tool()` now only injects `context`. Pre-existing from the
