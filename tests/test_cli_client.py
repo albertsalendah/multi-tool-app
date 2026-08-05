@@ -1,3 +1,5 @@
+import time
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -118,6 +120,73 @@ def test_get_unknown_job_raises_api_error_with_404():
 
     try:
         client.get_job("does-not-exist")
+    except ApiError as exc:
+        assert exc.status_code == 404
+    else:
+        raise AssertionError("Expected ApiError.")
+
+
+def test_create_and_get_schedule_round_trip():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_for(kernel)
+
+    try:
+        created = client.create_schedule(0.01, "echo", {"value": 9})
+        schedule_id = created["schedule_id"]
+
+        deadline = time.time() + 1
+        job_id = None
+        while job_id is None and time.time() < deadline:
+            job_id = client.get_schedule(schedule_id)["job_id"]
+            if job_id is None:
+                time.sleep(0.01)
+
+        assert job_id is not None
+        kernel.jobs.wait(job_id, timeout=1)
+
+        schedule = client.get_schedule(schedule_id)
+        assert schedule["status"] == "completed"
+        assert schedule["job_id"] == job_id
+    finally:
+        kernel.jobs.shutdown()
+
+
+def test_cancel_schedule():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_for(kernel)
+
+    try:
+        created = client.create_schedule(10, "echo", {"value": 1})
+
+        result = client.cancel_schedule(created["schedule_id"])
+        assert result == {"schedule_id": created["schedule_id"], "cancelled": True}
+
+        schedule = client.get_schedule(created["schedule_id"])
+        assert schedule["status"] == "cancelled"
+    finally:
+        kernel.jobs.shutdown()
+
+
+def test_create_schedule_for_unknown_tool_raises_api_error_with_404():
+    kernel = ApplicationKernel()
+    client = _client_for(kernel)
+
+    try:
+        client.create_schedule(10, "does_not_exist")
+    except ApiError as exc:
+        assert exc.status_code == 404
+    else:
+        raise AssertionError("Expected ApiError.")
+
+
+def test_get_unknown_schedule_raises_api_error_with_404():
+    kernel = ApplicationKernel()
+    client = _client_for(kernel)
+
+    try:
+        client.get_schedule("does-not-exist")
     except ApiError as exc:
         assert exc.status_code == 404
     else:

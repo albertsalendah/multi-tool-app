@@ -1,6 +1,8 @@
 import os
 import time
 
+import pytest
+
 from app.kernel import ApplicationKernel
 from tools.base_tool import BaseTool
 
@@ -91,3 +93,56 @@ def test_kernel_shutdown_respects_configured_timeout_for_a_stuck_background_job(
             os.environ.pop("JOBS_SHUTDOWN_TIMEOUT_SECONDS", None)
         else:
             os.environ["JOBS_SHUTDOWN_TIMEOUT_SECONDS"] = old
+
+
+def test_schedule_tool_validates_unknown_tool_immediately():
+    """Regression guard: schedule_tool() must fail right away for a bad
+    tool name, not silently succeed and only surface as a failed job
+    once the timer eventually fires."""
+    kernel = ApplicationKernel()
+
+    with pytest.raises(KeyError):
+        kernel.schedule_tool(10, "does_not_exist")
+
+    kernel.scheduler.shutdown()
+    kernel.jobs.shutdown()
+
+
+def test_schedule_tool_validates_missing_capability_immediately():
+    kernel = ApplicationKernel()
+    _register(kernel, RecordingTool(), capabilities=["browser"])
+    # No "browser" service registered (kernel.initialize() never ran),
+    # so this must fail immediately, same as run_tool() would.
+
+    with pytest.raises(RuntimeError):
+        kernel.schedule_tool(10, "recording", value="x")
+
+    kernel.scheduler.shutdown()
+    kernel.jobs.shutdown()
+
+
+def test_schedule_tool_runs_the_real_tool_after_the_delay():
+    """The one JobManager job a schedule dispatches into must be the
+    actual tool execution (real result), not a throwaway job whose
+    result is just another job_id."""
+    kernel = ApplicationKernel()
+    _register(kernel, RecordingTool())
+
+    try:
+        schedule_id = kernel.schedule_tool(0.01, "recording", value="scheduled")
+
+        deadline = time.time() + 1
+        job_id = None
+        while job_id is None and time.time() < deadline:
+            scheduled = kernel.scheduler.get(schedule_id)
+            job_id = scheduled.job_id if scheduled else None
+            time.sleep(0.01)
+
+        assert job_id is not None
+        result = kernel.jobs.wait(job_id, timeout=1)
+
+        assert result == "scheduled"
+        assert kernel.scheduler.status(schedule_id) == "completed"
+    finally:
+        kernel.scheduler.shutdown()
+        kernel.jobs.shutdown()

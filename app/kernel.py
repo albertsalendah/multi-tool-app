@@ -36,7 +36,14 @@ class ApplicationKernel:
             completed_ttl_seconds=self.config.get("jobs.completed_ttl_seconds", 3600),
             max_completed_jobs=self.config.get("jobs.max_completed_jobs", 500),
         )
-        self.scheduler = Scheduler(self.jobs)
+        self.scheduler = Scheduler(
+            self.jobs,
+            event_bus=self.events,
+            completed_ttl_seconds=self.config.get("scheduler.completed_ttl_seconds", 3600),
+            max_completed_schedules=self.config.get(
+                "scheduler.max_completed_schedules", 500
+            ),
+        )
         self.workflow = WorkflowEngine(self)
 
     def initialize(self):
@@ -214,4 +221,33 @@ class ApplicationKernel:
         return self.workflow.execute(
             workflow,
             background=background,
+        )
+
+    def schedule_tool(self, delay_seconds: float, name: str, **kwargs):
+        """Schedule a one-time tool execution `delay_seconds` from now.
+
+        Validates the tool exists and permissions check out immediately
+        (mirrors run_tool()'s own upfront checks) - a bad tool name or
+        missing capability raises right away instead of silently
+        succeeding here and only surfacing as a failed job once the
+        timer eventually fires. The same checks run again at dispatch
+        time inside run_tool() itself - cheap, and a real app could
+        plausibly uninstall a tool or change permissions in the gap
+        between scheduling and firing.
+
+        The scheduled function is run_tool(name, background=False,
+        ...) - background=False so the *one* JobManager job this
+        dispatches into is the actual tool execution (full
+        initialize/validate/run/cleanup lifecycle, real result), not a
+        throwaway job whose result is just another job_id.
+
+        Returns a schedule_id, not a job_id - use self.scheduler.status()
+        or self.scheduler.get(), which delegate to the underlying job's
+        status once dispatched.
+        """
+        manifest = self.registry.get_manifest(name)
+        self.permissions.validate(manifest, self.container)
+
+        return self.scheduler.schedule(
+            delay_seconds, self.run_tool, name, background=False, **kwargs
         )

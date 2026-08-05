@@ -7,6 +7,9 @@ from cli.main import (
     _cmd_jobs_create,
     _cmd_jobs_get,
     _cmd_jobs_cancel,
+    _cmd_schedules_create,
+    _cmd_schedules_get,
+    _cmd_schedules_cancel,
     _cmd_tools_list,
     build_parser,
     main,
@@ -31,6 +34,14 @@ class FakeClient:
             "error": None,
         }
         self.cancel_job_response = {"job_id": "job-1", "cancelled": True}
+        self.create_schedule_response = {"schedule_id": "sched-1"}
+        self.get_schedule_response = {
+            "schedule_id": "sched-1",
+            "status": "scheduled",
+            "run_at": "2026-01-01T00:00:00+00:00",
+            "job_id": None,
+        }
+        self.cancel_schedule_response = {"schedule_id": "sched-1", "cancelled": True}
 
     def health(self):
         self.calls.append(("health",))
@@ -55,6 +66,18 @@ class FakeClient:
     def wait_for_job(self, job_id, poll_interval=0.5, timeout=None):
         self.calls.append(("wait_for_job", job_id, poll_interval, timeout))
         return self.get_job_response
+
+    def create_schedule(self, delay_seconds, tool, params=None):
+        self.calls.append(("create_schedule", delay_seconds, tool, params))
+        return self.create_schedule_response
+
+    def get_schedule(self, schedule_id):
+        self.calls.append(("get_schedule", schedule_id))
+        return self.get_schedule_response
+
+    def cancel_schedule(self, schedule_id):
+        self.calls.append(("cancel_schedule", schedule_id))
+        return self.cancel_schedule_response
 
 
 def _run(func, client, args) -> dict:
@@ -93,6 +116,22 @@ def test_parser_builds_expected_command_tree():
     assert args.wait is False
     assert args.poll_interval == 0.5
     assert args.timeout is None
+
+    args = parser.parse_args(["schedules", "get", "abc"])
+    assert args.func is _cmd_schedules_get
+    assert args.schedule_id == "abc"
+
+    args = parser.parse_args(["schedules", "cancel", "abc"])
+    assert args.func is _cmd_schedules_cancel
+    assert args.schedule_id == "abc"
+
+    args = parser.parse_args(
+        ["schedules", "create", "--tool", "echo", "--delay-seconds", "5"]
+    )
+    assert args.func is _cmd_schedules_create
+    assert args.tool == "echo"
+    assert args.delay_seconds == 5.0
+    assert args.param == []
 
 
 def test_missing_subcommand_is_a_parse_error():
@@ -196,6 +235,38 @@ def test_malformed_param_raises_value_error():
         assert "KEY=VALUE" in str(exc)
     else:
         raise AssertionError("Expected ValueError for a malformed --param.")
+
+
+def test_schedules_create_parses_typed_and_string_params():
+    client = FakeClient()
+    args = build_parser().parse_args(
+        [
+            "schedules", "create", "--tool", "echo", "--delay-seconds", "5",
+            "--param", "count=5",
+            "--param", "flag=true",
+        ]
+    )
+
+    output = _run(args.func, client, args)
+
+    assert client.calls == [
+        ("create_schedule", 5.0, "echo", {"count": 5, "flag": True})
+    ]
+    assert output == client.create_schedule_response
+
+
+def test_schedules_get_and_cancel_dispatch_with_schedule_id():
+    client = FakeClient()
+
+    args = build_parser().parse_args(["schedules", "get", "sched-1"])
+    output = _run(args.func, client, args)
+    assert ("get_schedule", "sched-1") in client.calls
+    assert output == client.get_schedule_response
+
+    args = build_parser().parse_args(["schedules", "cancel", "sched-1"])
+    output = _run(args.func, client, args)
+    assert ("cancel_schedule", "sched-1") in client.calls
+    assert output == client.cancel_schedule_response
 
 
 # --------------------------------------------------------------------------

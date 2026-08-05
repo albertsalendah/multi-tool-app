@@ -12,6 +12,10 @@ jobs:
   max_completed_jobs: 500
   shutdown_timeout_seconds: 10.0
 
+scheduler:
+  completed_ttl_seconds: 3600
+  max_completed_schedules: 500
+
 logging:
   level: INFO
   file: logs/app.log

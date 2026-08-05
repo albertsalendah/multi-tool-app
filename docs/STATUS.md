@@ -19,7 +19,7 @@
 - [x] Workflow Engine (linear steps, ParallelGroup, retry/timeout/condition/continue_on_error)
 - [x] Workflow Events (workflow.started/progress/completed/failed)
 - [x] Plugin SDK (real initialize/validate/run/cleanup lifecycle, resilient discovery)
-- [x] REST API (/api/v1: health, tools, jobs)
+- [x] REST API (/api/v1: health, tools, jobs, schedules)
 - [x] CLI (installable `multitool` console script, REST API client -
       pip install -e .)
 - [x] Web UI fast-path reconciliation - GET /tools/video-downloader/info
@@ -79,12 +79,10 @@
       `Job` gained its own lock, an atomic `_update()`, and a
       `snapshot()` used by `GET /jobs/{id}`; `JobManager` now
       TTL/max-count-evicts completed jobs (config-driven, disabled by
-      default for the bare class). `Scheduler`'s identical unbounded-
-      growth issue, `Scheduler`'s missing REST/CLI surface,
-      `ToolRegistry`'s shared-instance footgun, and
-      `PermissionManager`'s partial enforcement are still open - see
-      `docs/ARCHITECTURE_CHANGELOG.md`'s "Design/Scale Gaps Fixed" for
-      detail on what's done vs. still open.
+      default for the bare class). `ToolRegistry`'s shared-instance
+      footgun and `PermissionManager`'s partial enforcement are still
+      open - see `docs/ARCHITECTURE_CHANGELOG.md`'s "Design/Scale Gaps
+      Fixed" for detail.
 - [x] `JobManager.shutdown()` bounded wait (2026-08-05): takes an
       optional `timeout` - signals cooperative cancellation on
       still-running jobs first, waits up to the bound, then gives up
@@ -97,14 +95,29 @@
       Python-level one. See `docs/ARCHITECTURE_CHANGELOG.md`'s
       "JobManager.shutdown() Bounded Wait" for detail, including why a
       real thread-kill or `ProcessPoolExecutor` switch were ruled out.
+- [x] Scheduler cleanup + REST/CLI surface (2026-08-05):
+      `Scheduler._schedules` now TTL/max-count-evicts terminal
+      schedules the same way `JobManager` does (event-driven -
+      subscribes to `job.completed`/`failed`/`cancelled` to detect a
+      dispatched schedule's underlying job finishing). New
+      `Kernel.schedule_tool()` connects scheduling to actual tool
+      execution with upfront validation (bad tool name / missing
+      capability fails immediately, not once the timer fires). New
+      `POST /schedules`, `GET /schedules/{id}`, `DELETE
+      /schedules/{id}` (mirrors `/jobs`, no list endpoint - the
+      person's explicit choice) plus matching `multitool schedules
+      create/get/cancel` CLI commands. Known limitation: cancelling an
+      already-dispatched schedule can't cooperatively stop the tool
+      mid-run (only pre-dispatch cancellation is clean) - see
+      `docs/ARCHITECTURE_CHANGELOG.md`'s "Scheduler Cleanup + REST/CLI
+      Surface" for why.
 
 ## Current Milestone
 None actively in progress. Remaining from Known Technical Debt in
 `docs/ARCHITECTURE_CHANGELOG.md`: Security (explicitly deferred by the
-person while testing locally), `Scheduler`'s unbounded growth and
-missing REST/CLI surface, `ToolRegistry`'s shared-instance footgun,
-`PermissionManager`'s partial enforcement, and two undecided items, in
-the person's own stated priority:
+person while testing locally), `ToolRegistry`'s shared-instance
+footgun, `PermissionManager`'s partial enforcement, and two undecided
+items, in the person's own stated priority:
 1. General tool-execution timeout design (separate from both the
    BrowserManager watchdog and the JobManager.shutdown() bound above -
    neither answers "can a specific running job be stopped on demand,

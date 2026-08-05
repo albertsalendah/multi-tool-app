@@ -63,6 +63,19 @@ def _cmd_jobs_cancel(client: ApiClient, args: argparse.Namespace) -> None:
     _print(client.cancel_job(args.job_id))
 
 
+def _cmd_schedules_create(client: ApiClient, args: argparse.Namespace) -> None:
+    params = _parse_params(args.param)
+    _print(client.create_schedule(args.delay_seconds, args.tool, params))
+
+
+def _cmd_schedules_get(client: ApiClient, args: argparse.Namespace) -> None:
+    _print(client.get_schedule(args.schedule_id))
+
+
+def _cmd_schedules_cancel(client: ApiClient, args: argparse.Namespace) -> None:
+    _print(client.cancel_schedule(args.schedule_id))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="multitool",
@@ -135,6 +148,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     jobs_cancel_parser.add_argument("job_id")
     jobs_cancel_parser.set_defaults(func=_cmd_jobs_cancel)
+
+    schedules_parser = subparsers.add_parser(
+        "schedules", help="Create, inspect, and cancel scheduled tool runs."
+    )
+    schedules_sub = schedules_parser.add_subparsers(
+        dest="schedules_command", required=True
+    )
+
+    schedules_create_parser = schedules_sub.add_parser(
+        "create", help="Schedule a tool to run after a delay."
+    )
+    schedules_create_parser.add_argument(
+        "--tool", required=True, help="Tool name - see 'multitool tools list'."
+    )
+    schedules_create_parser.add_argument(
+        "--delay-seconds",
+        type=float,
+        required=True,
+        help="Seconds from now to run the tool.",
+    )
+    schedules_create_parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Keyword argument for the tool. Repeatable. Value is "
+        "JSON-decoded when possible (so 5, true, null, \"str\" work as "
+        "expected), otherwise passed through as a plain string.",
+    )
+    schedules_create_parser.set_defaults(func=_cmd_schedules_create)
+
+    schedules_get_parser = schedules_sub.add_parser(
+        "get", help="Get a schedule's status (and underlying job once fired)."
+    )
+    schedules_get_parser.add_argument("schedule_id")
+    schedules_get_parser.set_defaults(func=_cmd_schedules_get)
+
+    schedules_cancel_parser = schedules_sub.add_parser(
+        "cancel", help="Cancel a schedule, before or after it fires."
+    )
+    schedules_cancel_parser.add_argument("schedule_id")
+    schedules_cancel_parser.set_defaults(func=_cmd_schedules_cancel)
 
     return parser
 

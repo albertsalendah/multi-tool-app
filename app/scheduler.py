@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
@@ -27,16 +28,90 @@ class ScheduledJob:
     timer: Timer | None = None
     job_id: str | None = None
     status: ScheduleStatus = ScheduleStatus.SCHEDULED
+    completed_at: float | None = None
 
 
 class Scheduler:
     """Schedules one-time executions through the platform Job Manager."""
 
-    def __init__(self, jobs: JobManager):
+    _TERMINAL_JOB_EVENTS = ("job.completed", "job.failed", "job.cancelled")
+
+    def __init__(
+        self,
+        jobs: JobManager,
+        event_bus=None,
+        completed_ttl_seconds: float | None = None,
+        max_completed_schedules: int | None = None,
+    ):
         self._jobs = jobs
         self._schedules: dict[str, ScheduledJob] = {}
+        self._job_id_to_schedule_id: dict[str, str] = {}
         self._lock = Lock()
         self._stopped = False
+        self._events = event_bus
+        # Both default to None (disabled) so a bare Scheduler(jobs) - as
+        # used throughout the test suite - keeps every schedule forever,
+        # same as before this cleanup was added. The real app wires
+        # actual values in from config via the Kernel.
+        self._completed_ttl_seconds = completed_ttl_seconds
+        self._max_completed_schedules = max_completed_schedules
+
+        if self._events:
+            # A schedule is "terminal" either because it was cancelled
+            # before ever firing, or because it fired and the JobManager
+            # job it dispatched has since finished - only the latter
+            # needs an event subscription to detect (the former is
+            # handled synchronously in cancel() below). One handler
+            # covers all three terminal job events; _job_id_to_schedule_id
+            # filters out job.* events that belong to unrelated jobs
+            # (regular kernel.run_tool() calls, not ones this Scheduler
+            # dispatched) as a cheap no-op.
+            for event in self._TERMINAL_JOB_EVENTS:
+                self._events.subscribe(event, self._handle_job_terminal)
+
+    def _handle_job_terminal(self, job_id, **_ignored):
+        with self._lock:
+            schedule_id = self._job_id_to_schedule_id.get(job_id)
+            if schedule_id is None:
+                return
+
+            scheduled = self._schedules.get(schedule_id)
+            if scheduled is not None:
+                scheduled.completed_at = time.time()
+
+    def _forget_locked(self, schedule_id: str) -> None:
+        """Caller must already hold self._lock."""
+        scheduled = self._schedules.pop(schedule_id, None)
+        if scheduled is not None and scheduled.job_id is not None:
+            self._job_id_to_schedule_id.pop(scheduled.job_id, None)
+
+    def _prune_completed_schedules_locked(self):
+        """Caller must already hold self._lock. Same lazy,
+        opportunistic-on-next-schedule() approach as JobManager's
+        equivalent - see its docstring for the reasoning."""
+        if self._completed_ttl_seconds is None and self._max_completed_schedules is None:
+            return
+
+        now = time.time()
+
+        if self._completed_ttl_seconds is not None:
+            expired = [
+                sid
+                for sid, s in self._schedules.items()
+                if s.completed_at is not None
+                and now - s.completed_at >= self._completed_ttl_seconds
+            ]
+            for sid in expired:
+                self._forget_locked(sid)
+
+        if self._max_completed_schedules is not None:
+            completed = sorted(
+                (s for s in self._schedules.values() if s.completed_at is not None),
+                key=lambda s: s.completed_at,
+            )
+            overflow = len(completed) - self._max_completed_schedules
+            for s in completed[: max(overflow, 0)]:
+                self._forget_locked(s.id)
 
     def schedule(
         self,
@@ -52,6 +127,8 @@ class Scheduler:
         with self._lock:
             if self._stopped:
                 raise RuntimeError("Scheduler has been shut down.")
+
+            self._prune_completed_schedules_locked()
 
             schedule_id = str(uuid4())
             scheduled = ScheduledJob(
@@ -82,6 +159,7 @@ class Scheduler:
                 context=scheduled.context,
                 **scheduled.kwargs,
             )
+            self._job_id_to_schedule_id[scheduled.job_id] = schedule_id
 
     def get(self, schedule_id: str) -> ScheduledJob | None:
         with self._lock:
@@ -106,6 +184,7 @@ class Scheduler:
 
             if scheduled.job_id is None:
                 scheduled.status = ScheduleStatus.CANCELLED
+                scheduled.completed_at = time.time()
                 if scheduled.timer:
                     scheduled.timer.cancel()
                 return True

@@ -81,6 +81,25 @@ class ApiClient:
     def cancel_job(self, job_id: str) -> dict:
         return self._request("DELETE", f"/api/v1/jobs/{job_id}")
 
+    def create_schedule(
+        self, delay_seconds: float, tool: str, params: dict | None = None
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/api/v1/schedules",
+            json={
+                "delay_seconds": delay_seconds,
+                "tool": tool,
+                "params": params or {},
+            },
+        )
+
+    def get_schedule(self, schedule_id: str) -> dict:
+        return self._request("GET", f"/api/v1/schedules/{schedule_id}")
+
+    def cancel_schedule(self, schedule_id: str) -> dict:
+        return self._request("DELETE", f"/api/v1/schedules/{schedule_id}")
+
     def wait_for_job(
         self,
         job_id: str,

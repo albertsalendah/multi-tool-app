@@ -242,17 +242,17 @@ All five fixed 2026-08-04 - see "Real Bugs Fixed" below for detail.
 - ~~`JobManager._jobs` grows forever - no cleanup, eviction, or
   archival~~ - fixed 2026-08-04 for `JobManager` specifically (TTL +
   max-count eviction of completed jobs). `Scheduler._schedules` has the
-  same issue and is explicitly **not** fixed - out of scope for this
-  round, still open. (`JOB_LIFECYCLE.md` documents a "Job Archived"
-  state that was never built.)
+  same issue - fixed 2026-08-05, see "Scheduler Cleanup + REST/CLI
+  Surface" below. (`JOB_LIFECYCLE.md` documents a "Job Archived" state
+  that was never built.)
 - ~~`JobManager.shutdown()` calls `executor.shutdown(wait=True)` -
   blocks indefinitely if any job is stuck~~ - fixed 2026-08-05, see
   "JobManager.shutdown() Bounded Wait" below. Note: this doesn't touch
   `Scheduler.shutdown()`, which never blocked on long-running work in
   the first place (it only cancels pending `Timer`s).
-- `Scheduler` is fully built, tested, wired into the kernel - and has
-  zero REST/CLI surface. Currently unreachable from outside the process.
-  Still open.
+- ~~`Scheduler` is fully built, tested, wired into the kernel - and had
+  zero REST/CLI surface~~ - fixed 2026-08-05, see "Scheduler Cleanup +
+  REST/CLI Surface" below.
 - ~~`GET /api/v1/tools` doesn't expose a tool's `capabilities`~~ - fixed
   2026-08-04.
 - `ToolRegistry` reuses one shared tool instance across every
@@ -457,6 +457,78 @@ Also re-verified with a real `uvicorn` boot + `curl` (normal job
 create/poll still works unaffected) and a real `SIGTERM` against the
 running process.
 
+### Scheduler Cleanup + REST/CLI Surface (2026-08-05)
+Two related fixes: `Scheduler._schedules` had the same unbounded-growth
+problem `JobManager._jobs` was fixed for on 2026-08-04, and `Scheduler`
+itself was fully built and tested but completely unreachable from
+outside the process.
+
+**Cleanup**, mirroring the `JobManager` approach exactly:
+- `app/scheduler.py`: `ScheduledJob` gained a `completed_at` field. A
+  schedule is terminal for two different reasons that both need
+  catching: cancelled before it ever fired (`completed_at` set
+  synchronously inside `cancel()`), or fired and the JobManager job it
+  dispatched has since finished (`completed_at` set via a new
+  `job.completed`/`job.failed`/`job.cancelled` event subscription -
+  same pattern `JobManager` already uses for progress - with a
+  `job_id -> schedule_id` reverse-lookup so it only reacts to events
+  from jobs it actually dispatched, not unrelated `kernel.run_tool()`
+  calls). `Scheduler` takes `completed_ttl_seconds` and
+  `max_completed_schedules` (both default `None`/disabled, so a bare
+  `Scheduler(jobs)` - as used throughout the test suite - keeps every
+  schedule forever exactly as before). `schedule()` opportunistically
+  prunes before adding the new one, same lazy on-next-call approach as
+  `JobManager`.
+- `config/default.yaml` / `app/kernel.py`: added `scheduler.
+  completed_ttl_seconds` (default `3600`) and `scheduler.
+  max_completed_schedules` (default `500`), wired through, plus
+  `event_bus=self.events` so the subscription above actually works in
+  the real app.
+
+**REST/CLI surface.** The real design question was connecting
+"schedule a tool run" to `Scheduler.schedule()`, which takes an
+arbitrary `func`, not a tool name - solved with `Kernel.schedule_tool
+(delay_seconds, name, **kwargs)`:
+- Validates the tool exists and permissions check out *immediately*
+  (mirrors `run_tool()`'s own upfront checks) - a bad tool name 404s
+  right away instead of silently succeeding and only surfacing as a
+  failed job once the timer eventually fires. The same checks run
+  again at dispatch time inside `run_tool()` itself too - cheap, and a
+  real app could plausibly uninstall a tool or change permissions in
+  the gap between scheduling and firing.
+- Schedules `self.run_tool` with `background=False` - so the *one*
+  JobManager job a schedule dispatches into **is** the actual tool
+  execution (full lifecycle, real result), not a throwaway job whose
+  result is just another job_id. Known limitation this introduces:
+  cancelling an already-*dispatched* schedule only cancels the outer
+  JobManager job's `CancellationToken` - `run_tool()`'s synchronous
+  (`background=False`) path doesn't check any cancellation token as it
+  runs, so it won't actually stop a long-running tool mid-execution
+  the way `POST /jobs` + `DELETE /jobs/{id}` can for a cooperative
+  tool. Cancelling *before* it fires works cleanly (that path just
+  cancels the `Timer`).
+- `app/api.py`: `POST /api/v1/schedules` {`delay_seconds`, `tool`,
+  `params`} / `GET /api/v1/schedules/{id}` / `DELETE
+  /api/v1/schedules/{id}` - deliberately mirroring `/jobs`'s shape
+  exactly, including no list endpoint (`/jobs` doesn't have one
+  either - the person's explicit choice when asked).
+- `cli/client.py` / `cli/main.py`: `multitool schedules create/get/
+  cancel`, same structure as the `jobs` subcommand.
+
+Tests: `tests/test_scheduler.py` gained cleanup-disabled-by-default,
+TTL eviction (both the cancelled-before-dispatch and
+dispatched-and-completed cases), max-count eviction (oldest-first),
+and a pending/running-schedules-never-evicted case.
+`tests/test_kernel.py` gained `schedule_tool()` tests: unknown-tool and
+missing-capability both raise immediately, and a full delay -> real
+tool result round trip. `tests/test_api.py` and `tests/test_cli_client.py`
+/ `tests/test_cli_main.py` gained the REST and CLI round trips
+respectively (create/poll/cancel, unknown-tool 404s, reserved-param
+rejection). Full suite: 169 passed, the same 1 pre-existing unrelated
+failure. Also re-verified with a real `uvicorn` boot: the full HTTP
+create/poll/cancel flow via `curl`, and separately via the actual
+installed `multitool` CLI console script against the running server.
+
 ### Current Focus
 Nothing actively in progress. Two undecided items carried forward,
 most consequential first:
@@ -519,16 +591,17 @@ for the complete list with detail):
   bypassing the kernel~~ - fixed 2026-08-04, see "Real Bugs Fixed" above.
 - No authentication on the REST API; CORS wide open - see "Full
   Platform Audit" / Current Focus.
-- `Scheduler` has no REST/CLI surface; `ToolRegistry` shared tool
-  instances are a footgun for future tool authors; `PermissionManager`
-  only enforces `browser` - see "Full Platform Audit" for detail. All
-  still open.
+- `ToolRegistry` shared tool instances are a footgun for future tool
+  authors; `PermissionManager` only enforces `browser` - see "Full
+  Platform Audit" for detail. Both still open.
+- ~~`Scheduler` has no REST/CLI surface~~ - fixed 2026-08-05, see
+  "Scheduler Cleanup + REST/CLI Surface" above.
 - ~~`JobManager.shutdown()` can block indefinitely on a stuck job~~ -
   fixed 2026-08-05, see "JobManager.shutdown() Bounded Wait" above.
 - ~~`JobManager._jobs` never cleaned up~~ - fixed 2026-08-04 for
-  `JobManager` (TTL + max-count eviction). `Scheduler._schedules` has
-  the same issue and is explicitly **not** fixed - out of scope for
-  this round.
+  `JobManager` (TTL + max-count eviction). `Scheduler._schedules` had
+  the same issue - fixed 2026-08-05, see "Scheduler Cleanup + REST/CLI
+  Surface" above.
 - ~~`GET /api/v1/tools` doesn't expose capabilities~~ - fixed
   2026-08-04, see "Design/Scale Gaps Fixed" above.
 - ~~`EventBus`/`ServiceContainer` have no locking or listener

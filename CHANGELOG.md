@@ -27,11 +27,13 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
   `initialize() -> validate() -> run() -> cleanup()` lifecycle instead
   of just `run()`.
 - REST API (`/api/v1`): `GET /health`, `GET /tools`, `POST /jobs`,
-  `GET /jobs/{id}`, `DELETE /jobs/{id}` - the Kernel is now reachable
-  over HTTP, not just in-process.
+  `GET /jobs/{id}`, `DELETE /jobs/{id}`, `POST /schedules`,
+  `GET /schedules/{id}`, `DELETE /schedules/{id}` - the Kernel is now
+  reachable over HTTP, not just in-process.
 - CLI: installable `multitool` console script (`pip install -e .`),
-  a REST API client covering health, tool listing, and the full job
-  lifecycle (create/get/cancel, with optional polling via `--wait`).
+  a REST API client covering health, tool listing, the full job
+  lifecycle (create/get/cancel, with optional polling via `--wait`),
+  and scheduled tool runs (create/get/cancel).
 - Web UI (fast path): `POST /api/v1/tools/{name}/run` added for
   synchronous tool execution. `video_downloader`'s info-lookup now
   goes through the Kernel/Plugin SDK lifecycle instead of a bespoke
@@ -104,16 +106,25 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
   first, waits up to the bound, then gives up and logs instead of
   hanging. Wired through `Kernel.shutdown()` with a real default
   (`jobs.shutdown_timeout_seconds`, 10s) so the app actually uses it.
+- `Scheduler._schedules` now evicts terminal (cancelled or
+  fired-and-completed) schedules by TTL and a max-count cap, same as
+  `JobManager` - previously grew forever. `Scheduler` also gained a
+  real REST/CLI surface (`POST`/`GET`/`DELETE /schedules`, `multitool
+  schedules create/get/cancel`) via a new `Kernel.schedule_tool()`
+  that validates the tool and permissions immediately rather than
+  waiting for the timer to fire.
 
 ### Known limitations
 - No streaming/live-progress endpoint yet; job status is poll-only.
-- `Scheduler._schedules` has the same unbounded-growth issue `JobManager`
-  just got fixed for - not addressed yet.
 - `JobManager.shutdown(timeout=...)` can't force-kill a stuck thread
   (Python doesn't support that) - it gives up waiting and moves on, but
   a truly hung thread can still delay final interpreter exit via
   `ThreadPoolExecutor`'s own `atexit` hook. Only an outside-the-process
   kill (e.g. `docker stop`) is a full backstop for that case.
+- Cancelling an already-*dispatched* schedule can't cooperatively stop
+  the tool mid-run - `schedule_tool()` runs the tool via `run_tool()`'s
+  synchronous path, which doesn't check a cancellation token as it
+  runs. Cancelling *before* it fires works cleanly.
 
 ## [0.1.0-architecture] - 2026-07-29
 

@@ -98,6 +98,33 @@ class RunToolResponse(BaseModel):
     result: Any = None
 
 
+class CreateScheduleRequest(BaseModel):
+    delay_seconds: float = Field(
+        ..., ge=0, description="Seconds from now to run the tool."
+    )
+    tool: str = Field(..., description="Registered tool name, see GET /tools.")
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Keyword arguments passed through to the tool's run().",
+    )
+
+
+class CreateScheduleResponse(BaseModel):
+    schedule_id: str
+
+
+class ScheduleResponse(BaseModel):
+    schedule_id: str
+    status: str
+    run_at: str
+    job_id: str | None = None
+
+
+class CancelScheduleResponse(BaseModel):
+    schedule_id: str
+    cancelled: bool
+
+
 # --------------------------------------------------------------------------
 # Endpoints
 # --------------------------------------------------------------------------
@@ -201,3 +228,51 @@ def run_tool_sync(
         raise HTTPException(status_code=400, detail=str(exc))
 
     return RunToolResponse(result=result)
+
+
+@router.post("/schedules", response_model=CreateScheduleResponse, status_code=202)
+def create_schedule(
+    body: CreateScheduleRequest,
+    kernel: ApplicationKernel = Depends(get_kernel),
+):
+    _reject_reserved_params(body.params)
+
+    try:
+        schedule_id = kernel.schedule_tool(
+            body.delay_seconds, body.tool, **body.params
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown tool: '{body.tool}'"
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return CreateScheduleResponse(schedule_id=schedule_id)
+
+
+@router.get("/schedules/{schedule_id}", response_model=ScheduleResponse)
+def get_schedule(schedule_id: str, kernel: ApplicationKernel = Depends(get_kernel)):
+    scheduled = kernel.scheduler.get(schedule_id)
+
+    if scheduled is None:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    return ScheduleResponse(
+        schedule_id=scheduled.id,
+        status=str(kernel.scheduler.status(schedule_id)),
+        run_at=scheduled.run_at.isoformat(),
+        job_id=scheduled.job_id,
+    )
+
+
+@router.delete("/schedules/{schedule_id}", response_model=CancelScheduleResponse)
+def cancel_schedule(schedule_id: str, kernel: ApplicationKernel = Depends(get_kernel)):
+    scheduled = kernel.scheduler.get(schedule_id)
+
+    if scheduled is None:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    cancelled = kernel.scheduler.cancel(schedule_id)
+
+    return CancelScheduleResponse(schedule_id=schedule_id, cancelled=cancelled)

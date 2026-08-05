@@ -155,6 +155,119 @@ def test_cancel_unknown_job_returns_404():
     assert response.status_code == 404
 
 
+# --------------------------------------------------------------------------
+# POST/GET/DELETE /api/v1/schedules
+# --------------------------------------------------------------------------
+
+
+def test_create_schedule_runs_the_tool_after_the_delay_and_can_be_polled():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    try:
+        response = client.post(
+            "/api/v1/schedules",
+            json={"delay_seconds": 0.01, "tool": "echo", "params": {"value": 42}},
+        )
+        assert response.status_code == 202
+        schedule_id = response.json()["schedule_id"]
+
+        response = client.get(f"/api/v1/schedules/{schedule_id}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "scheduled"
+        assert response.json()["job_id"] is None
+
+        deadline = time.time() + 1
+        job_id = None
+        while job_id is None and time.time() < deadline:
+            job_id = client.get(f"/api/v1/schedules/{schedule_id}").json()["job_id"]
+            if job_id is None:
+                time.sleep(0.01)
+
+        assert job_id is not None
+        kernel.jobs.wait(job_id, timeout=1)
+
+        response = client.get(f"/api/v1/schedules/{schedule_id}")
+        assert response.status_code == 200
+
+        body = response.json()
+        assert body["schedule_id"] == schedule_id
+        assert body["status"] == "completed"
+        assert body["job_id"] == job_id
+
+        job_response = client.get(f"/api/v1/jobs/{job_id}")
+        assert job_response.json()["result"] == 42
+    finally:
+        kernel.jobs.shutdown()
+
+
+def test_create_schedule_for_unknown_tool_returns_404():
+    kernel = ApplicationKernel()
+    client = _client_with_kernel(kernel)
+
+    response = client.post(
+        "/api/v1/schedules",
+        json={"delay_seconds": 10, "tool": "nope", "params": {}},
+    )
+
+    assert response.status_code == 404
+
+
+def test_create_schedule_rejects_reserved_param_name_background():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    response = client.post(
+        "/api/v1/schedules",
+        json={"delay_seconds": 10, "tool": "echo", "params": {"background": "x"}},
+    )
+
+    assert response.status_code == 400
+    assert "background" in response.json()["detail"]
+
+
+def test_get_unknown_schedule_returns_404():
+    kernel = ApplicationKernel()
+    client = _client_with_kernel(kernel)
+
+    response = client.get("/api/v1/schedules/does-not-exist")
+
+    assert response.status_code == 404
+
+
+def test_cancel_unknown_schedule_returns_404():
+    kernel = ApplicationKernel()
+    client = _client_with_kernel(kernel)
+
+    response = client.delete("/api/v1/schedules/does-not-exist")
+
+    assert response.status_code == 404
+
+
+def test_cancel_schedule_before_it_fires():
+    kernel = ApplicationKernel()
+    _register(kernel, EchoTool())
+    client = _client_with_kernel(kernel)
+
+    try:
+        response = client.post(
+            "/api/v1/schedules",
+            json={"delay_seconds": 10, "tool": "echo", "params": {}},
+        )
+        schedule_id = response.json()["schedule_id"]
+
+        response = client.delete(f"/api/v1/schedules/{schedule_id}")
+        assert response.status_code == 200
+        assert response.json() == {"schedule_id": schedule_id, "cancelled": True}
+
+        response = client.get(f"/api/v1/schedules/{schedule_id}")
+        assert response.json()["status"] == "cancelled"
+    finally:
+        kernel.jobs.shutdown()
+
+
 def test_cancel_stops_a_running_cooperative_job():
     kernel = ApplicationKernel()
     _register(kernel, CooperativeTool())

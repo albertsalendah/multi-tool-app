@@ -5,6 +5,7 @@
 - browser
 - jobs
 - logging
+- scheduler
 
 ## Sections (planned, not yet implemented)
 - server
