@@ -113,6 +113,11 @@ The format follows Keep a Changelog principles and Semantic Versioning where app
   schedules create/get/cancel`) via a new `Kernel.schedule_tool()`
   that validates the tool and permissions immediately rather than
   waiting for the timer to fire.
+- `run_tool()` now runs a fresh instance of a tool every execution
+  (`ToolRegistry.create_tool_instance()`) instead of reusing one shared
+  instance forever - closes a state-leak footgun for any tool author
+  who stores state on `self` instead of the per-execution
+  `ExecutionContext`.
 
 ### Known limitations
 - No streaming/live-progress endpoint yet; job status is poll-only.

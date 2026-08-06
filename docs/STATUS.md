@@ -79,10 +79,7 @@
       `Job` gained its own lock, an atomic `_update()`, and a
       `snapshot()` used by `GET /jobs/{id}`; `JobManager` now
       TTL/max-count-evicts completed jobs (config-driven, disabled by
-      default for the bare class). `ToolRegistry`'s shared-instance
-      footgun and `PermissionManager`'s partial enforcement are still
-      open - see `docs/ARCHITECTURE_CHANGELOG.md`'s "Design/Scale Gaps
-      Fixed" for detail.
+      default for the bare class).
 - [x] `JobManager.shutdown()` bounded wait (2026-08-05): takes an
       optional `timeout` - signals cooperative cancellation on
       still-running jobs first, waits up to the bound, then gives up
@@ -111,12 +108,26 @@
       mid-run (only pre-dispatch cancellation is clean) - see
       `docs/ARCHITECTURE_CHANGELOG.md`'s "Scheduler Cleanup + REST/CLI
       Surface" for why.
+- [x] ToolRegistry per-execution instances + PermissionManager
+      documentation (2026-08-05) - the final two Design/scale gaps,
+      closing that list out entirely (Security aside, which stays
+      explicitly deferred). `ToolRegistry.create_tool_instance()`
+      gives `run_tool()` a fresh tool instance every execution instead
+      of one shared instance forever - closes the state-leak footgun
+      structurally rather than just by convention. This broke 5
+      existing tests that turned out to be relying on the exact
+      anti-pattern being fixed (worth knowing about, not just fixed
+      quietly - see `docs/ARCHITECTURE_CHANGELOG.md`). `PermissionManager`
+      now documents why only `browser` is really enforced instead of
+      reading like an unfinished feature - a deliberate call, not
+      "real enforcement machinery" for capabilities with nothing
+      concrete to check against yet.
 
 ## Current Milestone
-None actively in progress. Remaining from Known Technical Debt in
-`docs/ARCHITECTURE_CHANGELOG.md`: Security (explicitly deferred by the
-person while testing locally), `ToolRegistry`'s shared-instance
-footgun, `PermissionManager`'s partial enforcement, and two undecided
+None actively in progress. The Design/scale gaps list from the full
+platform audit is now fully closed out. Remaining from Known Technical
+Debt in `docs/ARCHITECTURE_CHANGELOG.md`: Security (explicitly
+deferred by the person while testing locally), and two undecided
 items, in the person's own stated priority:
 1. General tool-execution timeout design (separate from both the
    BrowserManager watchdog and the JobManager.shutdown() bound above -

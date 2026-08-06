@@ -28,22 +28,27 @@ class SleepTool(BaseTool):
 
 
 class FlakyTool(BaseTool):
-    """Fails `fail_times` calls, then succeeds. State is per-instance so
-    each test gets a clean counter."""
+    """Fails `fail_times` calls, then succeeds. calls is deliberately a
+    class-level counter, not per-instance: kernel.run_tool() creates a
+    fresh tool instance for every attempt including retries (see
+    ToolRegistry.create_tool_instance()), so per-instance state would
+    reset to 0 on every retry and this could never recover. A
+    class-level counter simulates a flaky *external* resource - the
+    realistic case retries actually exist to handle - rather than the
+    tool object itself remembering its own attempt count, which isn't
+    how a real transient failure would behave anyway."""
 
     name = "flaky"
-
-    def __init__(self):
-        self.calls = 0
+    calls = 0
 
     def run(self, *, context=None, **kwargs):
-        self.calls += 1
+        FlakyTool.calls += 1
         fail_times = kwargs.get("fail_times", 0)
 
-        if self.calls <= fail_times:
-            raise RuntimeError(f"transient failure #{self.calls}")
+        if FlakyTool.calls <= fail_times:
+            raise RuntimeError(f"transient failure #{FlakyTool.calls}")
 
-        return self.calls
+        return FlakyTool.calls
 
 
 class AlwaysFailTool(BaseTool):
@@ -144,8 +149,8 @@ def test_condition_can_reference_earlier_step_results():
 
 
 def test_retry_recovers_from_transient_failure():
-    flaky = FlakyTool()
-    kernel = _kernel_with_tools(flaky)
+    FlakyTool.calls = 0
+    kernel = _kernel_with_tools(FlakyTool())
     wf = Workflow("retry")
 
     wf.add_step("flaky", fail_times=2, retry=2, result_as="result")
@@ -153,7 +158,7 @@ def test_retry_recovers_from_transient_failure():
     results = kernel.workflow.execute(wf)
 
     assert results == [3]
-    assert flaky.calls == 3
+    assert FlakyTool.calls == 3
 
 
 def test_step_failure_propagates_without_continue_on_error():

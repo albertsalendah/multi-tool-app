@@ -146,3 +146,34 @@ def test_schedule_tool_runs_the_real_tool_after_the_delay():
     finally:
         kernel.scheduler.shutdown()
         kernel.jobs.shutdown()
+
+
+class StatefulTool(BaseTool):
+    name = "stateful"
+
+    def __init__(self):
+        self.seen = None
+
+    def run(self, *, context=None, **kwargs):
+        # Returns what THIS instance saw before now, then records the
+        # new value - the anti-pattern context.set_state() exists to
+        # avoid. If run_tool() reused one shared instance across calls,
+        # the second call would see the first call's value here.
+        previous = self.seen
+        self.seen = kwargs.get("value")
+        return previous
+
+
+def test_run_tool_does_not_leak_self_state_between_executions():
+    """Regression test for the ToolRegistry shared-instance footgun:
+    each run_tool() call must get a fresh tool instance via
+    create_tool_instance(), not the one shared instance kept for
+    metadata."""
+    kernel = ApplicationKernel()
+    _register(kernel, StatefulTool())
+
+    first = kernel.run_tool("stateful", value="first")
+    second = kernel.run_tool("stateful", value="second")
+
+    assert first is None
+    assert second is None

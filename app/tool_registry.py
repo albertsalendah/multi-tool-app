@@ -80,6 +80,27 @@ class ToolRegistry:
     def get_tool(self, name: str) -> BaseTool:
         return self._tools[name]
 
+    def create_tool_instance(self, name: str) -> BaseTool:
+        """A fresh instance of the tool registered as `name`, safe to run
+        without leaking state into other executions.
+
+        get_tool() returns the one shared instance kept for metadata
+        (name/version/description/capabilities are all class-level
+        attributes, so reading them off the shared instance is fine) -
+        but reusing that same instance to actually *run* a tool means
+        anything a tool author stores on `self` (instead of the
+        per-execution ExecutionContext via context.set_state()) leaks
+        across concurrent or sequential executions. Every current tool
+        already follows the context.set_state() convention correctly
+        (see video_downloader_interactive's initialize()/cleanup()), but
+        nothing enforced it for future tool authors - this does.
+
+        Assumes a no-arg constructor, true for every tool today (none
+        override __init__); a tool that needs constructor arguments
+        would need a different registration path, not just this method.
+        """
+        return type(self._tools[name])()
+
     def list_tools(self):
         return list(self._tools.keys())
 

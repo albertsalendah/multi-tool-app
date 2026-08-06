@@ -176,7 +176,7 @@ class ApplicationKernel:
             manifest,
             self.container,
         )
-        tool = self.get_tool(name)
+        tool = self.registry.create_tool_instance(name)
 
         context = (
             ExecutionContext(

@@ -255,16 +255,17 @@ All five fixed 2026-08-04 - see "Real Bugs Fixed" below for detail.
   REST/CLI Surface" below.
 - ~~`GET /api/v1/tools` doesn't expose a tool's `capabilities`~~ - fixed
   2026-08-04.
-- `ToolRegistry` reuses one shared tool instance across every
-  execution, forever. Handled correctly for the interactive tool via
-  `context.set_state()`, but it's a footgun for any future tool author
-  who stores state on `self` instead. Still open.
+- ~~`ToolRegistry` reuses one shared tool instance across every
+  execution, forever~~ - fixed 2026-08-05, see "ToolRegistry Per-
+  Execution Instances + PermissionManager Documentation" below.
 - ~~`EventBus.emit()` doesn't isolate listener failures, and neither it
   nor `ServiceContainer` has any locking~~ - fixed 2026-08-04.
 - `PermissionManager` only really enforces the `browser` capability -
-  `network`/`filesystem`/`captcha`/`clipboard`/`database` are
-  declared-but-unchecked (map to `None` in `_services`). Worth
-  confirming this is intentional rather than assumed-done. Still open.
+  documented 2026-08-05 as an intentional boundary, not fixed as
+  "real enforcement" (there's nothing meaningful to enforce for
+  `network`/`filesystem`, and no backing service yet for
+  `clipboard`/`database`/`captcha`) - see "ToolRegistry Per-Execution
+  Instances + PermissionManager Documentation" below.
 
 **Minor - six of these were fixed this round, see below for which.**
 
@@ -529,6 +530,79 @@ failure. Also re-verified with a real `uvicorn` boot: the full HTTP
 create/poll/cancel flow via `curl`, and separately via the actual
 installed `multitool` CLI console script against the running server.
 
+### ToolRegistry Per-Execution Instances + PermissionManager Documentation (2026-08-05)
+The last two items from the Design/scale gaps list. Closes out that
+list entirely except Security (explicitly deferred).
+
+**`ToolRegistry`**: checked the actual blast radius before touching
+anything - `get_tool()` has exactly one call site (`kernel.run_tool()`),
+every test registers tools via `registry.register(instance)` for setup
+only, and neither real tool (`video_downloader`, `video_downloader_
+interactive`) overrides `__init__`. Low-risk to fix properly rather
+than just document:
+- `app/tool_registry.py`: added `create_tool_instance(name)` ->
+  `type(self._tools[name])()` - a fresh instance via the same class.
+  `get_tool()` is untouched, still returns the one shared instance
+  (fine - name/version/description/capabilities are all class-level
+  attributes, safe to read off any instance or the class itself).
+- `app/kernel.py`: `run_tool()` now calls
+  `self.registry.create_tool_instance(name)` instead of `self.get_tool
+  (name)` for the instance it actually executes.
+- Assumes a no-arg constructor - true for every tool today. A tool
+  needing constructor arguments would need a different registration
+  path, not just this method; not a problem in practice yet.
+
+**Real fallout, not just theoretical**: this broke 5 existing tests
+that turned out to rely on the exact anti-pattern being fixed -
+worth recording since it's a genuine, non-obvious discovery, not
+swept under the rug:
+- Four lifecycle tests (`tests/test_tool_lifecycle.py`) recorded
+  `initialize`/`validate`/`run`/`cleanup` calls on `self.calls` /
+  `self.cleanup_called`, then asserted against the *externally-held,
+  originally-registered* instance - which, after this fix, is no
+  longer the instance that actually ran. Fixed by moving that state to
+  class-level attributes (shared across every instance of the class
+  regardless of which one executed), explicitly reset at the start of
+  each test to avoid leaking between tests.
+- One workflow retry test (`tests/test_workflow_engine.py`)'s
+  `FlakyTool` used `self.calls` to simulate "fails N times then
+  succeeds" *across retry attempts* - its own docstring literally said
+  "State is per-instance so each test gets a clean counter." Each
+  retry is a full fresh `kernel.run_tool()` call, so this only ever
+  worked because of the shared-instance bug: real transient failures
+  are handled by retrying against changed *external* conditions, not
+  by the tool object remembering its own attempt count - a real
+  retry-safe tool shouldn't (and now structurally can't) rely on that.
+  Fixed the same way: a class-level counter, standing in for a flaky
+  external resource instead of tool-internal memory.
+
+**`PermissionManager`**: pushed back on "real enforcement" as the
+actual goal here rather than assuming more machinery is automatically
+better. `network`/`filesystem` aren't gated by anything in this
+architecture - every tool already has unrestricted stdlib access to
+both, so a trivial always-true marker service would "enforce" nothing,
+just add ceremony around a check that could never fail.
+`clipboard`/`database` have no backing service at all yet. `captcha`
+does have a real library (`libraries/captcha_manager`), but it's
+instantiated directly per-browser-session by tools today, not exposed
+as a container service - wiring it up as one is real architecture
+work, and part of the CAPTCHA-specific refinement explicitly deferred
+elsewhere, not this class's call to make unilaterally. `app/
+permission_manager.py` now documents this as an intentional boundary
+(with the reasoning above) rather than something that reads like an
+unfinished feature.
+
+Tests: `tests/test_tool_registry.py` gained `create_tool_instance()`
+tests (fresh instance each call, no state leakage between them,
+`get_tool()` still returns the shared instance). `tests/test_kernel.py`
+gained an end-to-end regression test with a stateful tool proving
+`run_tool()` itself doesn't leak `self` state across two sequential
+calls. Full suite: 173 passed, the same 1 pre-existing unrelated
+failure - after fixing the 5 tests above that this change legitimately
+broke. Also re-verified with a real `uvicorn` boot: tool listing,
+and a job create/poll round trip run sequentially twice to confirm the
+general request/response plumbing is unaffected.
+
 ### Current Focus
 Nothing actively in progress. Two undecided items carried forward,
 most consequential first:
@@ -591,9 +665,13 @@ for the complete list with detail):
   bypassing the kernel~~ - fixed 2026-08-04, see "Real Bugs Fixed" above.
 - No authentication on the REST API; CORS wide open - see "Full
   Platform Audit" / Current Focus.
-- `ToolRegistry` shared tool instances are a footgun for future tool
-  authors; `PermissionManager` only enforces `browser` - see "Full
-  Platform Audit" for detail. Both still open.
+- ~~`ToolRegistry` shared tool instances are a footgun for future tool
+  authors~~ - fixed 2026-08-05, see "ToolRegistry Per-Execution
+  Instances + PermissionManager Documentation" above.
+- ~~`PermissionManager` only enforces `browser`~~ - documented
+  2026-08-05 as an intentional boundary rather than fixed as "real
+  enforcement" - see "ToolRegistry Per-Execution Instances +
+  PermissionManager Documentation" above for why.
 - ~~`Scheduler` has no REST/CLI surface~~ - fixed 2026-08-05, see
   "Scheduler Cleanup + REST/CLI Surface" above.
 - ~~`JobManager.shutdown()` can block indefinitely on a stuck job~~ -

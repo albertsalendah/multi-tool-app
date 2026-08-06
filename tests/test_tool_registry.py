@@ -1,5 +1,16 @@
 import app.tool_registry as tool_registry_module
 from app.tool_registry import ToolRegistry
+from tools.base_tool import BaseTool
+
+
+class _StatefulTool(BaseTool):
+    name = "stateful"
+
+    def __init__(self):
+        self.seen = None
+
+    def run(self, *, context=None, **kwargs):
+        return self.seen
 
 
 def test_discover_tools_skips_a_broken_plugin_without_crashing():
@@ -62,3 +73,44 @@ def test_real_video_downloader_interactive_manifest_loads():
     assert manifest.entry == "tool:VideoDownloaderInteractiveTool"
     assert manifest.capabilities == ["browser", "network"]
     assert len(registry.list_tools()) == 2
+
+
+def test_create_tool_instance_returns_a_fresh_instance_each_time():
+    registry = ToolRegistry()
+    shared = _StatefulTool()
+    registry.register(shared)
+
+    first = registry.create_tool_instance("stateful")
+    second = registry.create_tool_instance("stateful")
+
+    assert first is not shared
+    assert second is not shared
+    assert first is not second
+    assert isinstance(first, _StatefulTool)
+
+
+def test_create_tool_instance_does_not_leak_state_between_executions():
+    """Regression test for the shared-instance footgun: mutating self on
+    one instance (the anti-pattern context.set_state() exists to avoid)
+    must not be visible from a later create_tool_instance() call."""
+    registry = ToolRegistry()
+    registry.register(_StatefulTool())
+
+    first = registry.create_tool_instance("stateful")
+    first.seen = "leaked?"
+
+    second = registry.create_tool_instance("stateful")
+
+    assert second.seen is None
+
+
+def test_get_tool_still_returns_the_shared_instance_for_metadata():
+    """get_tool() is for introspection (name/version/description/
+    capabilities are all class-level attributes) - it intentionally
+    keeps returning the one shared instance, unlike
+    create_tool_instance()."""
+    registry = ToolRegistry()
+    shared = _StatefulTool()
+    registry.register(shared)
+
+    assert registry.get_tool("stateful") is shared
