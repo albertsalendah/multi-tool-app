@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAPTCHA Domain-Lock Spike</title>
+<style>
+  :root {
+    --bg: #1b1f24; --surface: #22262c; --border: #2e333a;
+    --text: #e8e6e1; --muted: #8b9198; --accent: #e8a33d;
+    --ok: #6bbf7b; --bad: #e08a7a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    padding: 32px 20px 80px; line-height: 1.5;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .subtitle { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
+  .steps {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 28px;
+    font-size: 14px;
+  }
+  .steps h2 { font-size: 14px; margin: 0 0 10px; color: var(--accent); }
+  .steps ol { margin: 0; padding-left: 20px; }
+  .steps li { margin-bottom: 6px; }
+  code {
+    background: #14171b; border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; font-size: 13px;
+  }
+  .vendor {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 20px;
+  }
+  .vendor h2 { font-size: 16px; margin: 0 0 4px; }
+  .vendor .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .row { display: flex; gap: 8px; margin-bottom: 14px; }
+  input[type=text] {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 9px 10px; color: var(--text); font-size: 14px;
+  }
+  button {
+    background: var(--accent); border: none; border-radius: 6px;
+    padding: 9px 16px; color: #1b1f24; font-weight: 600; cursor: pointer;
+    font-size: 14px;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .widget-box {
+    min-height: 78px; display: flex; align-items: center;
+    padding: 8px 0;
+  }
+  .status { font-size: 13px; margin-top: 8px; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--bad); }
+  .status.pending { color: var(--muted); }
+  .notes {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px; margin-top: 28px; font-size: 14px;
+  }
+  .notes h2 { font-size: 14px; margin: 0 0 8px; color: var(--accent); }
+  textarea {
+    width: 100%; min-height: 90px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+    padding: 10px; font-family: inherit; font-size: 13px; resize: vertical;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>CAPTCHA Domain-Lock Spike</h1>
+  <p class="subtitle">Does a site key extracted from a real target site still render when embedded on a different domain (yours)? This is the one question that decides whether the "native widget" approach is viable at all.</p>
+
+  <div class="steps">
+    <h2>How to get a real site key</h2>
+    <ol>
+      <li>Find a real site that shows one of these three CAPTCHA types (a login page, a signup form, a "protected by Cloudflare" page - anything that trips a challenge). Use an ORDINARY site, not a CAPTCHA-solving service's own demo page - those are deliberately left embeddable and won't tell us anything about a typical site's real configuration.</li>
+      <li>Open browser DevTools -> Network tab, reload the page, filter for <code>recaptcha</code> / <code>hcaptcha</code> / <code>turnstile</code>.</li>
+      <li>Find the iframe request URL. The site key is the value after <code>k=</code> (reCAPTCHA) or <code>sitekey=</code> (hCaptcha/Turnstile) in that URL - just that value, not the whole URL. For hCaptcha specifically: double check you're not grabbing the hash that appears in the URL PATH (<code>/captcha/v1/&lt;hash&gt;/static/hcaptcha.html</code>) - that's hCaptcha's own client release version, not the site key, even though both can look like similar hex strings.</li>
+      <li>Paste it into the matching box below and click Render.</li>
+    </ol>
+    <h2 style="margin-top:14px">Important: serve this over HTTP, not file://</h2>
+    <ol>
+      <li>Save this file, then from its folder run: <code>python3 -m http.server 8000</code></li>
+      <li>Open <code>http://localhost:8000/captcha-domain-lock-spike.html</code> - some vendor SDKs behave differently (or reject outright) on a <code>file://</code> origin, which would give you a false negative.</li>
+    </ol>
+  </div>
+
+  <div class="vendor">
+    <h2>reCAPTCHA v2</h2>
+    <p class="hint">Historically the strictest about domain locking. CONFIRMED domain-locked against a real Facebook site key - see notes below.</p>
+    <div class="row">
+      <input type="text" id="recaptcha-key" placeholder="Paste site key (from k= param)">
+      <button id="recaptcha-btn" onclick="renderRecaptcha()">Render</button>
+    </div>
+    <div class="widget-box" id="recaptcha-container"></div>
+    <div class="status pending" id="recaptcha-status">Not tested yet.</div>
+  </div>
+
+  <div class="vendor">
+    <h2>hCaptcha</h2>
+    <p class="hint">Historically more lenient about domain locking than reCAPTCHA. Result so far inconclusive - re-test with a carefully re-extracted key, and compare against the official public test key as a control.</p>
+    <div class="row">
+      <input type="text" id="hcaptcha-key" placeholder="Paste site key (from sitekey= param)">
+      <button id="hcaptcha-btn" onclick="renderHcaptcha()">Render</button>
+    </div>
+    <div class="widget-box" id="hcaptcha-container"></div>
+    <div class="status pending" id="hcaptcha-status">Not tested yet.</div>
+  </div>
+
+  <div class="vendor">
+    <h2>Cloudflare Turnstile</h2>
+    <p class="hint">Domain-lock behavior varies by how the site owner configured their widget. Not yet tested.</p>
+    <div class="row">
+      <input type="text" id="turnstile-key" placeholder="Paste site key (from sitekey= param)">
+      <button id="turnstile-btn" onclick="renderTurnstile()">Render</button>
+    </div>
+    <div class="widget-box" id="turnstile-container"></div>
+    <div class="status pending" id="turnstile-status">Not tested yet.</div>
+  </div>
+
+  <div class="notes">
+    <h2>What to look for</h2>
+    <p style="color: var(--muted); margin-top:0">
+      A domain-lock rejection usually renders <em>inside the widget box itself</em> as an error
+      (e.g. reCAPTCHA shows "ERROR for site owner: Invalid domain for site key" or "Localhost is
+      not in the list of supported domains for this site key" right where the checkbox should be)
+      rather than a JS console error - so watch the box above each status line, not just the
+      status line itself. If the real checkbox/challenge renders and is interactive, that vendor
+      is not locking this particular site key to its original domain.
+    </p>
+    <p style="color: var(--muted)">
+      IMPORTANT: test each vendor in isolation (reload the page fresh between vendors, don't
+      render two vendors on the same page load). hCaptcha ships a reCAPTCHA-compatibility shim
+      (recaptchacompat) that hijacks window.grecaptcha once hCaptcha's own SDK has loaded on the
+      page - this caused a real false result during testing (a reCAPTCHA key got silently routed
+      to hCaptcha's servers instead of Google's). Testing one vendor per page load avoids this
+      entirely.
+    </p>
+    <h2>Log your findings here</h2>
+    <textarea placeholder="e.g. reCAPTCHA on site X: rejected, 'invalid domain'. hCaptcha on site Y: rendered fine, solved it, got a token.">reCAPTCHA v2 - Facebook site key (6LeyIlkaAAAAAE-EjcALU28lwxWPusUvGL3e0avS): REJECTED. "Localhost is not in the list of supported domains for this site key." Confirmed real, unambiguous, correctly-branded Google error. Domain-locking is real and enforced for this key.
+
+hCaptcha - Discord site key (1dab630d2576352c6ab33820f3c19d7400cd0955): INCONCLUSIVE. First attempt contaminated by the recaptchacompat bug (see note above, now fixed by testing in isolation). Also: this key's value is IDENTICAL to the hash in the iframe URL's path segment, which is normally hCaptcha's own client release version, not the site key - possible mis-extraction. Needs a clean re-test: (1) verify against hCaptcha's official always-passing public test key as a control, to confirm the test harness itself works, (2) re-extract a real key from Discord (or another real site) more carefully, double-checking it's the sitekey= param value, not the path hash.
+
+Turnstile - not yet tested. Have seen it in normal browsing (confirmed real, ordinary site usage) but hadn't extracted a key yet when this session ended.</textarea>
+  </div>
+</div>
+
+<script>
+  function setStatus(vendor, cls, text) {
+    const el = document.getElementById(vendor + '-status');
+    el.className = 'status ' + cls;
+    el.textContent = text;
+  }
+
+  // ---------------- reCAPTCHA ----------------
+  let recaptchaLoaded = false;
+  window.onRecaptchaLoad = function () {
+    recaptchaLoaded = true;
+    doRenderRecaptcha();
+  };
+  function renderRecaptcha() {
+    const key = document.getElementById('recaptcha-key').value.trim();
+    if (!key) { setStatus('recaptcha', 'bad', 'Paste a site key first.'); return; }
+    setStatus('recaptcha', 'pending', 'Loading widget...');
+    document.getElementById('recaptcha-container').innerHTML = '';
+    if (recaptchaLoaded && window.grecaptcha && window.grecaptcha.render) {
+      doRenderRecaptcha();
+    } else if (!document.getElementById('recaptcha-sdk')) {
+      const s = document.createElement('script');
+      s.id = 'recaptcha-sdk';
+      s.src = 'https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit';
+      s.async = true; s.defer = true;
+      document.head.appendChild(s);
+    }
+  }
+  function doRenderRecaptcha() {
+    const key = document.getElementById('recaptcha-key').value.trim();
+    try {
+      grecaptcha.render('recaptcha-container', {
+        sitekey: key,
+        callback: (token) => setStatus('recaptcha', 'ok', 'Solved! Token received (first 24 chars): ' + token.slice(0, 24) + '...'),
+      });
+      setStatus('recaptcha', 'pending', 'Widget rendered - check the box above for an error message, or solve it to confirm it fully works.');
+    } catch (e) {
+      setStatus('recaptcha', 'bad', 'Render threw an error: ' + e.message);
+    }
+  }
+
+  // ---------------- hCaptcha ----------------
+  let hcaptchaLoaded = false;
+  window.onHcaptchaLoad = function () {
+    hcaptchaLoaded = true;
+    doRenderHcaptcha();
+  };
+  function renderHcaptcha() {
+    const key = document.getElementById('hcaptcha-key').value.trim();
+    if (!key) { setStatus('hcaptcha', 'bad', 'Paste a site key first.'); return; }
+    setStatus('hcaptcha', 'pending', 'Loading widget...');
+    document.getElementById('hcaptcha-container').innerHTML = '';
+    if (hcaptchaLoaded && window.hcaptcha && window.hcaptcha.render) {
+      doRenderHcaptcha();
+    } else if (!document.getElementById('hcaptcha-sdk')) {
+      const s = document.createElement('script');
+      s.id = 'hcaptcha-sdk';
+      s.src = 'https://js.hcaptcha.com/1/api.js?onload=onHcaptchaLoad&render=explicit';
+      s.async = true; s.defer = true;
+      document.head.appendChild(s);
+    }
+  }
+  function doRenderHcaptcha() {
+    const key = document.getElementById('hcaptcha-key').value.trim();
+    try {
+      hcaptcha.render('hcaptcha-container', {
+        sitekey: key,
+        callback: (token) => setStatus('hcaptcha', 'ok', 'Solved! Token received (first 24 chars): ' + token.slice(0, 24) + '...'),
+      });
+      setStatus('hcaptcha', 'pending', 'Widget rendered - check the box above for an error message, or solve it to confirm it fully works.');
+    } catch (e) {
+      setStatus('hcaptcha', 'bad', 'Render threw an error: ' + e.message);
+    }
+  }
+
+  // ---------------- Turnstile ----------------
+  let turnstileLoaded = false;
+  window.onTurnstileLoad = function () {
+    turnstileLoaded = true;
+    doRenderTurnstile();
+  };
+  function renderTurnstile() {
+    const key = document.getElementById('turnstile-key').value.trim();
+    if (!key) { setStatus('turnstile', 'bad', 'Paste a site key first.'); return; }
+    setStatus('turnstile', 'pending', 'Loading widget...');
+    document.getElementById('turnstile-container').innerHTML = '';
+    if (turnstileLoaded && window.turnstile && window.turnstile.render) {
+      doRenderTurnstile();
+    } else if (!document.getElementById('turnstile-sdk')) {
+      const s = document.createElement('script');
+      s.id = 'turnstile-sdk';
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad&render=explicit';
+      s.async = true; s.defer = true;
+      document.head.appendChild(s);
+    }
+  }
+  function doRenderTurnstile() {
+    const key = document.getElementById('turnstile-key').value.trim();
+    try {
+      turnstile.render('#turnstile-container', {
+        sitekey: key,
+        callback: (token) => setStatus('turnstile', 'ok', 'Solved! Token received (first 24 chars): ' + token.slice(0, 24) + '...'),
+        'error-callback': () => setStatus('turnstile', 'bad', 'Turnstile reported an error - likely domain rejection. Check the box above too.'),
+      });
+      setStatus('turnstile', 'pending', 'Widget rendered - check the box above for an error message, or solve it to confirm it fully works.');
+    } catch (e) {
+      setStatus('turnstile', 'bad', 'Render threw an error: ' + e.message);
+    }
+  }
+</script>
+</body>
+</html>

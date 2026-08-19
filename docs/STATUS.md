@@ -124,23 +124,34 @@
       concrete to check against yet.
 
 ## Current Milestone
-None actively in progress. The Design/scale gaps list from the full
-platform audit is now fully closed out. Remaining from Known Technical
-Debt in `docs/ARCHITECTURE_CHANGELOG.md`: Security (explicitly
-deferred by the person while testing locally), and two undecided
-items, in the person's own stated priority:
-1. General tool-execution timeout design (separate from both the
-   BrowserManager watchdog and the JobManager.shutdown() bound above -
-   neither answers "can a specific running job be stopped on demand,
-   mid-run, outside of shutdown")
-2. No authentication on the REST API at all - low risk while
-   local-only, real risk the moment this is exposed beyond one machine
+None actively in progress on the platform side. The Design/scale gaps
+list from the full platform audit is now fully closed out. Remaining
+from Known Technical Debt in `docs/ARCHITECTURE_CHANGELOG.md`:
+Security (explicitly deferred by the person while testing locally),
+and the general tool-execution timeout question - discussed at length
+and explicitly decided to wait on for now (reasoning: the only real
+mechanism is cooperative-cancellation-plus-give-up, same limitation
+`JobManager.shutdown()` has, and only one tool checks cancellation at
+all today, at two coarse points - building general timeout
+infrastructure around tools whose own shape isn't settled yet was
+judged premature). Revisit either once explicitly prioritized.
+
+The actual current focus is CAPTCHA/`video_downloader` design work -
+see `docs/HANDOVER_2026-08-19.md` for the full, detailed state of
+this; summary immediately below.
 
 ## Next Milestones
-- video_downloader/CAPTCHA-specific improvements (explicitly deferred
-  by the person until "everything else" is handled first - e.g. the
-  120s-flat CAPTCHA manual-wait, wiring the new BrowserManager timeout
-  into the interactive tool)
+- **CAPTCHA/`video_downloader` architecture - in progress, not just
+  deferred anymore.** Two spike tests done
+  (`docs/spikes/captcha-domain-lock-spike.html`,
+  `docs/spikes/captcha_screencast_test.py`), one real finding
+  confirmed (reCAPTCHA v2 is genuinely domain-locked against a real
+  site's key), one still needing a clean re-test (hCaptcha), one not
+  yet started (Turnstile), and one open design question needing an
+  explicit answer before real integration code gets written (how the
+  screencast/modal spike relates to the native-widget-embedding
+  direction). Full detail, findings, and suggested next steps in
+  `docs/HANDOVER_2026-08-19.md`.
 - Real Tools (beyond video_downloader)
 - Browser Pool (reuse acquired sessions instead of one per acquire())
 - Desktop UI / Mobile app - deferred until the web app is solid
