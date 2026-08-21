@@ -363,11 +363,19 @@ h1 {
 
 #stream-canvas {
   display: block;
-  width: 100%;
-  min-height: 480px; /* Prevents collapsed bar before first frame renders */
+  max-width: 100%;
+  max-height: 65vh; /* guarantees it fits on screen regardless of the
+                        frame's aspect ratio or the viewer's screen shape -
+                        this, not the source aspect ratio, was the actual
+                        cause of content getting cut off on wide/short
+                        (laptop) screens */
+  min-height: 200px; /* smaller floor than before - a large fixed
+                          min-height fought with max-height on short
+                          viewports */
   background: #111;
   user-select: none;
   object-fit: contain;
+  margin: 0 auto;
 }
 
 .canvas-loader {
