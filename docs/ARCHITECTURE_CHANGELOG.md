@@ -701,4 +701,103 @@ for the complete list with detail):
   not a poll loop - deliberately not touched (separate shared library,
   video_downloader/CAPTCHA work is deferred).
 
+## 2026-08-21
+
+### CDP Screencast + Click-Forwarding Spike - Confirmed Working
+`docs/spikes/captcha_screencast_test.py` went from "viewing only,
+unreliable" to a fully confirmed interactive path: real reCAPTCHA
+image-selection challenges (not just the checkbox) solved successfully
+from desktop Firefox, desktop Chrome, Android Chrome, and 1DM+, across
+two physical machines plus a phone over LAN. Findings, in the order
+they were found:
+
+- **CDP's asyncio loop must be explicitly pumped for screencast frames
+  to be processed at all** - confirmed by isolated testing: plain
+  `time.sleep()` in the polling loop leaves the frame counter at 0
+  forever regardless of headless. Nothing drives `mycdp`'s loop on its
+  own; `sb.cdp.loop.run_until_complete(asyncio.sleep(...))` (or
+  equivalent) is required, not optional.
+- **`Page.startScreencast` is repaint-triggered, not continuous** - a
+  static page produces no further frames until something actually
+  repaints. Worked around with a `Page.captureScreenshot()`-seeded
+  first frame so the modal shows something immediately instead of
+  staying blank until the first real interaction.
+- **MJPEG push (`multipart/x-mixed-replace`) confirmed broken in
+  Chrome/Chromium, works in Firefox only.** Isolated via server-side
+  connect/write/disconnect logging showing identical bytes and
+  identical write behavior sent to both a working (Firefox) and a
+  broken (Chrome) client - proved the break was entirely client-side,
+  not a server or capture bug. Chrome, Android Chrome, and 1DM+
+  (Chromium-based) all silently dropped the stream after a partial
+  read; Firefox rendered it correctly every time. Replaced entirely
+  with plain polling (`GET /frame`, single JPEG per request, client
+  re-requests on a `setInterval` with a cache-busting query param) -
+  works identically everywhere since it's nothing but ordinary
+  repeated HTTP GETs, no reliance on any browser's multipart handling.
+- **Click-forwarding added and confirmed correct.** Client computes a
+  click's position as a fraction of the actual rendered image content
+  (accounting for `object-fit: contain` letterboxing so edge clicks
+  aren't misattributed), posts `{frac_x, frac_y}` to `POST /click`;
+  server decodes the current frame's real pixel dimensions (parsed
+  directly from the JPEG's SOF marker - no new Pillow dependency for
+  just this), scales by the accompanying `ScreencastFrameMetadata`
+  (`device_width`/`device_height`/`offset_top`/`page_scale_factor`)
+  into real CSS-pixel viewport coordinates, and dispatches
+  `mousePressed`/`mouseReleased` via CDP's `Input.dispatchMouseEvent`.
+  The formula was built from CDP's documented field semantics (no
+  worked reference example found to cross-check against first) and
+  initially shipped flagged as unverified; solving real multi-tile
+  image challenges across four browser/device combinations is now
+  good evidence the math is actually correct, not just plausible.
+- **`headless=True` retested clean under the polling architecture -
+  correcting an earlier, overconfident claim.** Earlier testing (under
+  the old MJPEG transport) showed frame count climbing but the image
+  staying blank under `headless=True`, and that was attributed to "a
+  known Chromium headless-screencast rendering limitation" - stated
+  with more confidence than was actually earned, since it was never
+  checked against real captured bytes from a headless run specifically
+  (only `headless=False` frames were ever byte-verified via the
+  `frame_N.jpg`/`seed_frame.jpg` debug dumps). Retested under v3
+  (polling): works cleanly, no blank frames. Most likely the earlier
+  observation was the same Chrome/MJPEG bug above, coincidentally
+  present in that specific test too, not a genuine headless-capture
+  problem. Matters beyond the spike itself: `tool.py` hardcodes
+  `headless=False` specifically so a human can *see* the real window to
+  solve a CAPTCHA - if a human can instead solve it remotely via this
+  screencast+click-forwarding mechanism, that requirement may no
+  longer apply, which matters directly for the eventual remote-server
+  deployment target (no display to hand a real window to there).
+  Lightly retested so far, not yet stress-tested - worth a couple more
+  full solves under `headless=True` before leaning on it for a real
+  design decision.
+- **Sizing/blur fixed for the spike, explicitly not for production.**
+  The captured frame is the *whole page*, so a small widget on a large
+  page renders tiny and, at fixed JPEG quality, blurrier than
+  necessary. Fixed for testing purposes by shrinking the real browser
+  window (`Page.setWindowSize` via CDP) so the page - and the widget in
+  it - fills more of the frame, plus a quality bump (70 -> 85) now that
+  there's headroom. Explicitly flagged as not the production answer:
+  `video_downloader_interactive` runs against arbitrary third-party
+  sites, and forcing a small viewport there risks tripping a site's
+  mobile/responsive layout and changing where or whether the CAPTCHA
+  even renders. The real fix is cropping the encoded frame to the
+  actual CAPTCHA element's on-page bounding box (findable via
+  `libraries/captcha_manager`'s existing detector/selectors) rather
+  than shrinking the window globally - not built, real next step.
+- **Minor fix**: a second, impatient Ctrl+C during manual testing could
+  land inside SeleniumBase's own `--uc` teardown/reconnect logic and
+  hang rather than exit - worked around with `os._exit(0)` on the first
+  interrupt rather than a bare `return` (which still triggers `with
+  SB(...)`'s normal `__exit__`/teardown path, the thing that was
+  hanging). Test-script-only concern; production never has a Ctrl+C
+  loop at all (browser lifecycle goes through `BrowserManager.release()`
+  via the normal job lifecycle instead).
+
+**Still open, unresolved before any of this becomes real integration
+code**: the crop-to-actual-widget-location design (above), and how this
+whole mechanism fits into the still-unresolved "is the screencast/modal
+a fallback, a general feature, or always-on" question from the
+2026-08-19 handover - not decided this round either, this work was
+purely about proving the mechanism itself works, not where it fits.
+
 

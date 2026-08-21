@@ -137,21 +137,39 @@ infrastructure around tools whose own shape isn't settled yet was
 judged premature). Revisit either once explicitly prioritized.
 
 The actual current focus is CAPTCHA/`video_downloader` design work -
-see `docs/HANDOVER_2026-08-19.md` for the full, detailed state of
+see `docs/HANDOVER_2026-08-21.md` for the full, detailed state of
 this; summary immediately below.
 
 ## Next Milestones
 - **CAPTCHA/`video_downloader` architecture - in progress, not just
-  deferred anymore.** Two spike tests done
-  (`docs/spikes/captcha-domain-lock-spike.html`,
-  `docs/spikes/captcha_screencast_test.py`), one real finding
-  confirmed (reCAPTCHA v2 is genuinely domain-locked against a real
-  site's key), one still needing a clean re-test (hCaptcha), one not
-  yet started (Turnstile), and one open design question needing an
-  explicit answer before real integration code gets written (how the
-  screencast/modal spike relates to the native-widget-embedding
-  direction). Full detail, findings, and suggested next steps in
-  `docs/HANDOVER_2026-08-19.md`.
+  deferred anymore.** Two spike tracks:
+  - Domain-lock spike (`docs/spikes/captcha-domain-lock-spike.html`):
+    one real finding confirmed (reCAPTCHA v2 is genuinely domain-locked
+    against a real site's key), hCaptcha still needing a clean re-test,
+    Turnstile not yet started.
+  - **Screencast/click-forwarding spike
+    (`docs/spikes/captcha_screencast_test.py`) - now confirmed working
+    end to end, not just viewing.** Real reCAPTCHA image-selection
+    challenges solved successfully from desktop Firefox, desktop
+    Chrome, Android Chrome, and 1DM+, across two physical machines plus
+    a phone over LAN. MJPEG push transport confirmed broken in Chrome/
+    Chromium specifically (works in Firefox only); replaced with plain
+    polling, which works everywhere. `headless=True` also retested
+    clean under the polling architecture, overturning an earlier
+    (unverified) claim that headless screencast produces blank frames -
+    real implication: a human may no longer need to see the actual
+    browser window to solve a CAPTCHA, which is what the current
+    `headless=False` requirement in `tool.py` exists for.
+  - **Open design question still unresolved**: the captured frame is
+    the whole page, so the CAPTCHA renders tiny unless the browser
+    window is shrunk - fine for a spike, not viable in production
+    against arbitrary third-party sites (risks tripping a site's
+    mobile/responsive layout). Real answer is likely cropping to the
+    CAPTCHA element's actual on-page bounding box via
+    `libraries/captcha_manager`'s existing detector/selectors - not
+    built yet.
+  - Full detail, findings, and suggested next steps in
+    `docs/HANDOVER_2026-08-21.md`.
 - Real Tools (beyond video_downloader)
 - Browser Pool (reuse acquired sessions instead of one per acquire())
 - Desktop UI / Mobile app - deferred until the web app is solid
